@@ -1,0 +1,10 @@
+# app_attacks/west.yml:
+manifest:
+  remotes:
+    - name: zephyr_attacks
+      url-base: https://github.com/HannahGress/zephyr_attacks
+  projects:
+    - name: zephyr_attacks
+      remote: zephyr_attacks
+      revision: main
+      import: true
