@@ -2,7 +2,7 @@
 manifest:
   remotes:
     - name: zephyr_attacks
-      url-base: https://github.com/HannahGress/zephyr_attacks
+      url-base: https://github.com/HannahGress
   projects:
     - name: zephyr_attacks
       remote: zephyr_attacks
