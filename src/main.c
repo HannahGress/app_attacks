@@ -21,6 +21,7 @@
 #include <zephyr/usb/usb_device.h>
 #include <zephyr/drivers/uart.h>
 #include <autoconf.h>
+#include <host/smp.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
@@ -482,6 +483,39 @@ static int cmd_init(const struct shell *sh)
 	return 0;
 }
 
+static int cmd_knob(const struct shell *sh, size_t argc, char *argv[])
+{
+	if (argc != 2) {
+		shell_error(sh, "Usage: knob <true/false> or knob <key_size>");
+		return -EINVAL;
+	}
+
+	uint8_t key_size;
+
+	if (!strcmp(argv[1], "true")) {
+		key_size = 7;
+	} else if (!strcmp(argv[1], "false")) {
+		key_size = 16;
+	} else {
+		// Try to parse as a number
+		char *endptr;
+		long value = strtol(argv[1], &endptr, 10);
+
+		// Check if conversion was successful and within valid range
+		if (*endptr != '\0' || value < 7 || value > 16) {
+			shell_error(sh, "Invalid input. Use 'true', 'false', or a number between 7-16");
+			return -EINVAL;
+		}
+
+		key_size = (uint8_t)value;
+	}
+
+	bt_smp_set_enc_key_size(key_size);
+	shell_print(sh, "LTK entropy set to %u bytes", key_size);
+
+	return 0;
+}
+
 int main(void)
 {
 	printf("Hello World! %s\n", CONFIG_BOARD_TARGET);
@@ -512,8 +546,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD_ARG(disconnect, NULL, HELP_NONE, cmd_disconnect, 3, 0),
 	SHELL_CMD(security, NULL, "security level 2 for Nino attack", cmd_security),
 	SHELL_CMD_ARG(pair, NULL, NULL, cmd_pair, 3, 0),
-	SHELL_CMD_ARG(bonds, NULL, HELP_NONE, cmd_bonds, 1, 0),
-	SHELL_CMD_ARG(unpair, NULL, "[all] ["HELP_ADDR_LE"]", cmd_pairing_delete, 2, 0));
+	SHELL_CMD(bonds, NULL, HELP_NONE, cmd_bonds),
+	SHELL_CMD_ARG(unpair, NULL, "[all] ["HELP_ADDR_LE"]", cmd_pairing_delete, 3, 0),
+	SHELL_CMD_ARG(knob, NULL, "<true/false> (reduce LTK entropy)", cmd_knob, 2, 0),);
 
 
 SHELL_CMD_REGISTER(bleframework, &cmds, "Bluetooth shell commands", cmd_default_handler);
