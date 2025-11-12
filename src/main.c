@@ -516,6 +516,21 @@ static int cmd_knob(const struct shell *sh, size_t argc, char *argv[])
 	return 0;
 }
 
+static int cmd_scda(const struct shell *sh, size_t argc, char *argv[])
+{
+	if (argc != 2) {
+		shell_error(sh, "Usage: scda <true/false>");
+		return -EINVAL;
+	}
+
+	bool downgrade = !strcmp(argv[1], "true");
+
+	bt_smp_secure_connections_downgrade(downgrade);
+	shell_print(sh, "Secure Connections Downgrade Attack set to: %s", downgrade ? "true" : "false");
+
+	return 0;
+}
+
 int main(void)
 {
 	printf("Hello World! %s\n", CONFIG_BOARD_TARGET);
@@ -548,7 +563,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD_ARG(pair, NULL, NULL, cmd_pair, 3, 0),
 	SHELL_CMD(bonds, NULL, HELP_NONE, cmd_bonds),
 	SHELL_CMD_ARG(unpair, NULL, "[all] ["HELP_ADDR_LE"]", cmd_pairing_delete, 3, 0),
-	SHELL_CMD_ARG(knob, NULL, "<true/false> (reduce LTK entropy)", cmd_knob, 2, 0),);
+	SHELL_CMD_ARG(knob, NULL, "<true/false> (reduce LTK entropy)", cmd_knob, 2, 0),
+	SHELL_CMD_ARG(scda, NULL, "<true/false> (enable/disable Secure Connections Downgrade Attack)", cmd_scda, 2, 0),);
 
 
 SHELL_CMD_REGISTER(bleframework, &cmds, "Bluetooth shell commands", cmd_default_handler);
