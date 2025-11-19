@@ -20,12 +20,14 @@
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/usb/usb_device.h>
 #include <zephyr/drivers/uart.h>
-#include <autoconf.h>
+#include <host/keys.h>
 #include <host/smp.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/sys/barrier.h>
 
+#include "ifa.h"
 
 struct bt_conn *default_conn;
 uint8_t selected_id = BT_ID_DEFAULT;
@@ -72,7 +74,7 @@ static void scan_started(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 	}
 
 	/* connect only to devices in close proximity */
-	if (rssi > -50) {
+	if (rssi > -70) {
 		bt_addr_le_to_str(addr, dev, sizeof(dev));
 
 		shell_print(shell, "[DEVICE]: %s, AD evt type %u, AD data len %u, RSSI %i",
@@ -222,10 +224,11 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	if (err) {
-		shell_error(shell, "Failed to connect to %s (%u)\n", addr,
+		shell_error(shell, "connected(): Failed to connect to %s (%u)\n", addr,
 			   err);
 		bt_conn_unref(default_conn);
 		default_conn = NULL;
+		conn = NULL;
 		return;
 	}
 
@@ -244,12 +247,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	is_connected = true;
 
-	/*shell_print(shell,"bt_conn_set_security: %s", addr);
-	info_err = bt_conn_set_security(conn, BT_SECURITY_L2);
-	shell_print(shell,"bt_conn_set_security done: %s", addr);
-	if (info_err != 0) {
-		shell_error(shell,"Failed to set security (%d).\n", info_err);
-	}*/
+	k_sem_give(&conn_sem); // Signal that connection is complete
 
 }
 
@@ -267,7 +265,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 		return;
 	}
 
-	shell_print(shell, "%s: %s role %u, reason %u %s\n", __func__, addr, conn_info.role,
+	shell_print(shell, "%s: %s role %u, reason %u %s", __func__, addr, conn_info.role,
 		   reason, bt_hci_err_to_str(reason));
 
 	if (default_conn != conn) {
@@ -277,8 +275,12 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	bt_conn_unref(default_conn);
 	default_conn = NULL;
 
-	shell_print(shell,"Disconnected (reason %u)\n", reason);
+	bt_conn_unref(conn);
+	conn = NULL;
 
+	shell_print(shell,"Disconnected (reason %u)", reason);
+
+	k_sem_give(&disconn_sem); // Signal that disconnection is complete
 }
 
 static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err)
@@ -288,10 +290,12 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	if (!err) {
-		shell_print(shell, "Security changed: %s level %u\n", addr, level);
+		shell_print(shell, "Security with %s changed to level %u", addr, level);
 	} else {
-		shell_print(shell, "Security failed: %s level %u err %d\n", addr, level, err);
+		shell_error(shell, "Security failed: %s level %u err %d", addr, level, err);
 	}
+	k_sleep(K_MSEC(500));
+	k_sem_give(&bond_sem); // Signal that bonding is complete
 }
 
 
@@ -324,7 +328,7 @@ static void pairing_complete(struct bt_conn *conn, bool bonded)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	shell_print(shell, "Me: %s with %s", bonded ? "Bonded" : "Paired",
+	shell_print(shell, "pairing_complete(): %s with %s", bonded ? "Bonded" : "Paired",
 			addr);
 }
 
@@ -444,6 +448,7 @@ static int cmd_init(const struct shell *sh)
 {
 	int err;
 	shell = sh;
+	ifa_init(sh);
 
 	err = bt_enable(NULL);
 	if (err) {
@@ -452,11 +457,15 @@ static int cmd_init(const struct shell *sh)
 	}
 	printf("Bluetooth initialized\n");
 
-	settings_load();
-	printf("Settings loaded\n");
+	err = settings_load();
+	if(err < 0){
+		printf("Loading settings failed with err: %d\n", err);
+		printf("continuing anyways\n");
+	} else {
+		printf("Settings loaded\n");
+	}
 
 	default_conn = NULL;
-
 
 	err = bt_conn_auth_info_cb_register(&auth_info_cb);
 	if (err) {
@@ -536,7 +545,6 @@ int main(void)
 	printf("Hello World! %s\n", CONFIG_BOARD_TARGET);
 
 	return 0;
-
 }
 
 static int cmd_default_handler(const struct shell *sh, size_t argc, char **argv)
@@ -564,7 +572,18 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD(bonds, NULL, HELP_NONE, cmd_bonds),
 	SHELL_CMD_ARG(unpair, NULL, "[all] ["HELP_ADDR_LE"]", cmd_pairing_delete, 3, 0),
 	SHELL_CMD_ARG(knob, NULL, "<true/false> (reduce LTK entropy)", cmd_knob, 2, 0),
-	SHELL_CMD_ARG(scda, NULL, "<true/false> (enable/disable Secure Connections Downgrade Attack)", cmd_scda, 2, 0),);
+	SHELL_CMD_ARG(scda, NULL, "<true/false> (enable/disable Secure Connections Downgrade Attack)", cmd_scda, 2, 0),
+	SHELL_CMD_ARG(id_reset, NULL, "Enter an id which should be reset", cmd_reset, 2, 0),
+	SHELL_CMD_ARG(id_save, NULL, "", cmd_ifa_id_save, 1, 0),
+	SHELL_CMD_ARG(id_restore, NULL, "", cmd_ifa_id_restore, 1, 0),
 
+	SHELL_CMD_ARG(snapshot, NULL, "", cmd_ifa_snapshot_take, 3, 0),
+	SHELL_CMD_ARG(restore, NULL, "", cmd_ifa_snapshot_restore, 1, 0),
+
+	SHELL_CMD_ARG(ifa1, NULL, "", cmd_ifa_stage1, 3, 0),
+	SHELL_CMD_ARG(ifa2, NULL, "", cmd_ifa_stage2, 4, 0),
+	SHELL_CMD_ARG(ifa3, NULL, "", cmd_ifa_stage3, 1, 0),
+	SHELL_CMD_ARG(ifa4, NULL, "", cmd_ifa_stage4, 3, 0),
+	SHELL_CMD_ARG(ifa, NULL, "ifa addr addr_type n \n addr is target address formatted as "HELP_ADDR_LE" \n n is number of bondings\n", cmd_ifa, 4, 0));
 
 SHELL_CMD_REGISTER(bleframework, &cmds, "Bluetooth shell commands", cmd_default_handler);
