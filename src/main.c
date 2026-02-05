@@ -31,6 +31,7 @@ struct bt_conn *default_conn;
 uint8_t selected_id = BT_ID_DEFAULT;
 const struct shell *shell;
 static bool is_connected = false;
+static bool authenticated_pairing = false;
 
 static const char *security_err_str(enum bt_security_err err)
 {
@@ -294,6 +295,62 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
 	}
 }
 
+static void auth_passkey_display(struct bt_conn *conn, unsigned int passkey)
+{
+	if (!authenticated_pairing) {
+		return;
+	}
+
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+	shell_print(shell, "Passkey for %s: %06u\n", addr, passkey);
+}
+
+static void auth_passkey_confirm(struct bt_conn *conn, unsigned int passkey)
+{
+	if (!authenticated_pairing) {
+		return;
+	}
+
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+	shell_print(shell, "Confirm passkey for %s: %d", addr, passkey);
+}
+
+static void auth_passkey_entry(struct bt_conn *conn)
+{
+	if (!authenticated_pairing) {
+		return;
+	}
+
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+	shell_print(shell, "Enter passkey for %s", addr);
+}
+
+static void auth_pairing_confirm(struct bt_conn *conn)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+	shell_print(shell, "Confirm pairing for %s", addr);
+}
+
+static void auth_cancel(struct bt_conn *conn)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+	shell_print(shell, "Pairing cancelled: %s\n", addr);
+}
 
 enum bt_security_err pairing_accept(
 	struct bt_conn *conn, const struct bt_conn_pairing_feat *const feat)
@@ -314,8 +371,18 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err err)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	shell_print(shell, "Me: Pairing failed with %s reason: %s (%d)", addr,
+	switch(err) {
+		case BT_SECURITY_ERR_AUTH_FAIL:
+			shell_print(shell, "Pairing failed due to authentication reasons (0x03). Unauthenticated pairing (Just Works) with No Input No Output is not supported, "
+							 "use Passkey Entry or Numeric Comparison");
+			break;
+		case BT_SECURITY_ERR_UNSPECIFIED:
+			shell_print(shell, "Pairing failed du to unspecified reasons (0x08). Maybe try Passkey Entry or Numeric Comparison as association model.");
+			break;
+		default:
+			shell_print(shell, "Pairing failed with %s reason: %s (%d)", addr,
 			security_err_str(err), err);
+	}
 }
 
 static void pairing_complete(struct bt_conn *conn, bool bonded)
@@ -324,7 +391,7 @@ static void pairing_complete(struct bt_conn *conn, bool bonded)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	shell_print(shell, "Me: %s with %s", bonded ? "Bonded" : "Paired",
+	shell_print(shell, "Pairing complete: %s with %s", bonded ? "Bonded" : "Paired",
 			addr);
 }
 
@@ -338,6 +405,14 @@ static void bond_info(const struct bt_bond_info *info, void *user_data)
 	(*bond_count)++;
 }
 
+void bond_deleted(uint8_t id, const bt_addr_le_t *peer)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(peer, addr, sizeof(addr));
+	shell_print(shell, "Bond deleted for %s, id %u", addr, id);
+}
+
 static int cmd_bonds(const struct shell *sh)
 {
 	int bond_count = 0;
@@ -347,14 +422,6 @@ static int cmd_bonds(const struct shell *sh)
 	shell_print(sh, "Total %d", bond_count);
 
 	return 0;
-}
-
-void bond_deleted(uint8_t id, const bt_addr_le_t *peer)
-{
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(peer, addr, sizeof(addr));
-	shell_print(shell, "Bond deleted for %s, id %u", addr, id);
 }
 
 static int cmd_pairing_delete(const struct shell *sh, size_t argc, char *argv[])
@@ -397,10 +464,22 @@ static int cmd_pairing_delete(const struct shell *sh, size_t argc, char *argv[])
 	return err;
 }
 
-static int cmd_security(const struct shell *sh)
+static int cmd_security(const struct shell *sh, int sec_level)
 {
 	int err;
-	int sec = BT_SECURITY_L2;
+	int sec;
+
+	switch(sec_level) {
+		case 3:
+			sec = BT_SECURITY_L2;
+		break;
+		case 4:
+			sec = BT_SECURITY_L4;
+		break;
+		default:
+			sec = BT_SECURITY_L2;
+	}
+
 	struct bt_conn_info info;
 
 	if (!default_conn || (bt_conn_get_info(default_conn, &info) < 0)) {
@@ -419,19 +498,126 @@ static int cmd_security(const struct shell *sh)
 static int cmd_pair(const struct shell *sh, size_t argc, char *argv[]){
 	cmd_connect(sh, argc, argv);
 	k_sleep(K_SECONDS(2));
-	cmd_security(sh);
+	// check if security level is given. If not, set to 2 (default)
+	// 1 No encryption and no authentication;
+	// 2 Encryption and no authentication;
+	// 3 Encryption and authentication;
+	// 4 Bluetooth LE Secure Connection.
+
+	int level;
+	if (argc < 3) {
+		level = 2;
+		shell_print(sh, "argc < 3: Setting security level to 2 -> No Input No Output");
+	} else {
+		level = atoi(argv[3]);
+		// if level has no valid value (2, 3 or 4), then set to default (2)
+		if(level != 3 && level != 4) {
+			level = 2;
+			shell_print(sh, "level != 3 || level != 4: Setting security level to 2 -> No Input No Output");
+		}
+	}
+
+	cmd_security(sh, level);
 	return 0;
 }
 
-struct bt_conn_cb connection_callbacks = {
+static int cmd_auth_cancel(const struct shell *shell,
+			   size_t argc, char *argv[])
+{
+	struct bt_conn *conn;
+
+	if (default_conn) {
+		conn = default_conn;
+	} else {
+		conn = NULL;
+	}
+
+	if (!conn) {
+		shell_print(shell, "Not connected");
+		return -ENOEXEC;
+	}
+
+	bt_conn_auth_cancel(conn);
+
+	return 0;
+}
+
+static int cmd_auth_passkey(const struct shell *shell,
+				size_t argc, char *argv[])
+{
+	unsigned int passkey;
+	int err;
+
+	if (!default_conn) {
+		shell_print(shell, "Not connected");
+		return -ENOEXEC;
+	}
+
+	passkey = atoi(argv[1]);
+	if (passkey > 999999) {
+		shell_print(shell, "Passkey should be between 0-999999");
+		return -EINVAL;
+	}
+
+	err = bt_conn_auth_passkey_entry(default_conn, passkey);
+	if (err) {
+		shell_error(shell, "Failed to set passkey (%d)", err);
+		return err;
+	}
+
+	return 0;
+}
+
+static int cmd_auth_passkey_confirm(const struct shell *shell,
+					size_t argc, char *argv[])
+{
+	if (!default_conn) {
+		shell_print(shell, "Not connected");
+		return -ENOEXEC;
+	}
+
+	bt_conn_auth_passkey_confirm(default_conn);
+	return 0;
+}
+
+static int cmd_auth_pairing_confirm(const struct shell *shell,
+					size_t argc, char *argv[])
+{
+	if (!default_conn) {
+		shell_print(shell, "Not connected");
+		return -ENOEXEC;
+	}
+
+	bt_conn_auth_pairing_confirm(default_conn);
+	return 0;
+}
+
+static struct bt_conn_auth_cb auth_cb = {
+	// for Nino
+	.pairing_confirm = auth_pairing_confirm,
+	.pairing_accept = pairing_accept,
+	.cancel = auth_cancel,
+	// for authenticated pairing
+	.passkey_display = auth_passkey_display,
+	.passkey_entry = auth_passkey_entry,
+	.passkey_confirm = auth_passkey_confirm,
+};
+
+static struct bt_conn_cb connection_callbacks = {
 	.connected = connected,
 	.disconnected = disconnected,
 	.security_changed = security_changed,
 };
 
+/*
 static struct bt_conn_auth_cb conn_auth_callbacks = {
 	.pairing_accept = pairing_accept,
-};
+	.pairing_confirm = auth_pairing_confirm,
+	.passkey_display = auth_passkey_display,
+	.passkey_confirm = auth_passkey_confirm,
+	.passkey_entry = auth_passkey_entry,
+	.cancel = auth_cancel,
+};*/
 
 
 static struct bt_conn_auth_info_cb auth_info_cb = {
@@ -465,9 +651,9 @@ static int cmd_init(const struct shell *sh)
 	}
 	printf("Bluetooth authentication info callbacks registered.\n");
 
-	err = bt_conn_auth_cb_register(&conn_auth_callbacks);
+	err = bt_conn_auth_cb_register(&auth_cb);
 	if (err) {
-		printf("Failed to register authorization callbacks. (err %d)\n", err);
+		printf("Failed to register nino pairing callbacks. (err %d)\n", err);
 		return -1;
 	}
 
@@ -479,6 +665,24 @@ static int cmd_init(const struct shell *sh)
 		return -1;
 	}
 	printf("Bluetooth connection callbacks registered.\n");
+
+	return 0;
+}
+
+static int cmd_authenticated_pairing(const struct shell *sh, size_t argc, char *argv[]) {
+
+	if (argc != 2) {
+		shell_error(sh, "Usage: authenticated_pairing <true/false>");
+		return -EINVAL;
+	}
+
+	if (!strcmp(argv[1], "true")) {
+		authenticated_pairing = true;
+		shell_print(sh, "Authentication enabled");
+	} else {
+		authenticated_pairing = false;
+		shell_print(sh, "Authentication disabled");
+	}
 
 	return 0;
 }
@@ -531,6 +735,15 @@ static int cmd_scda(const struct shell *sh, size_t argc, char *argv[])
 	return 0;
 }
 
+static void cmd_automatic_testing(const struct shell *sh, size_t argc, char *argv[]) {
+	if (argc != 2) {
+		shell_error(sh, "Usage: automatic_testing <true/false>");
+	} else {
+		shell_print(sh, "Start with Nino");
+		cmd_pair(sh, argc, argv);
+	}
+}
+
 int main(void)
 {
 	printf("Hello World! %s\n", CONFIG_BOARD_TARGET);
@@ -560,11 +773,21 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD_ARG(connect, NULL, HELP_NONE, cmd_connect, 3, 0),
 	SHELL_CMD_ARG(disconnect, NULL, HELP_NONE, cmd_disconnect, 3, 0),
 	SHELL_CMD(security, NULL, "security level 2 for Nino attack", cmd_security),
-	SHELL_CMD_ARG(pair, NULL, NULL, cmd_pair, 3, 0),
+	SHELL_CMD_ARG(pair, NULL, "["HELP_ADDR_LE"], optional security level (2-4)", cmd_pair, 3, 1),
 	SHELL_CMD(bonds, NULL, HELP_NONE, cmd_bonds),
 	SHELL_CMD_ARG(unpair, NULL, "[all] ["HELP_ADDR_LE"]", cmd_pairing_delete, 3, 0),
+	SHELL_CMD_ARG(auth-cancel, NULL, HELP_NONE, cmd_auth_cancel, 1, 0),
+	SHELL_CMD_ARG(auth-passkey, NULL, "<passkey>", cmd_auth_passkey, 2, 0),
+	SHELL_CMD_ARG(auth-passkey-confirm, NULL, HELP_NONE,
+			  cmd_auth_passkey_confirm, 1, 0),
+	SHELL_CMD_ARG(auth-pairing-confirm, NULL, HELP_NONE,
+			  cmd_auth_pairing_confirm, 1, 0),
+	SHELL_CMD_ARG(authenticated_pairing, NULL, "true/false", cmd_authenticated_pairing, 2, 0),
 	SHELL_CMD_ARG(knob, NULL, "<true/false> (reduce LTK entropy)", cmd_knob, 2, 0),
-	SHELL_CMD_ARG(scda, NULL, "<true/false> (enable/disable Secure Connections Downgrade Attack)", cmd_scda, 2, 0),);
+	SHELL_CMD_ARG(scda, NULL, "<true/false> (enable/disable Secure Connections Downgrade Attack)", cmd_scda, 2, 0),
+	SHELL_CMD_ARG(automatic_testing, NULL, "automatic_testing ["HELP_ADDR_LE"]", cmd_automatic_testing, 3, 0));
 
 
 SHELL_CMD_REGISTER(bleframework, &cmds, "Bluetooth shell commands", cmd_default_handler);
+
+// big help for (authenticated) pairing method implementation: https://elixir.bootlin.com/zephyr/v2.6.1-rc2/source/subsys/bluetooth/shell/bt.c
