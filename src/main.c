@@ -74,7 +74,7 @@ static void scan_started(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 	}
 
 	/* connect only to devices in close proximity */
-	if (rssi > -70) {
+	if (rssi > -50) {
 		bt_addr_le_to_str(addr, dev, sizeof(dev));
 
 		shell_print(shell, "[DEVICE]: %s, AD evt type %u, AD data len %u, RSSI %i",
