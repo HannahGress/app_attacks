@@ -492,7 +492,6 @@ static int cmd_init(const struct shell *sh)
 {
 	int err;
 	shell = sh;
-	//ifa_init(sh);
 
 	err = bt_enable(NULL);
 	if (err) {

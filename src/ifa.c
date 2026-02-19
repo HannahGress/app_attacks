@@ -10,7 +10,6 @@
 
 static bool snapshot_taken = false;
 static bool id_saved = false;
-//const struct shell *ifa_shell;
 
 uint8_t old_irk[16] = {0};
 bt_addr_le_t old_addr;
@@ -22,9 +21,6 @@ K_SEM_DEFINE(bond_sem, 0, 1);
 void bt_rpa_invalidate(void);
 
 /* Part 1: internal functions ------------------------------------------------------------------------------------------- */
-void ifa_init(const struct shell *sh){
-  //ifa_shell = sh;
-}
 
 static int id_reset(uint8_t id, bt_addr_le_t *addr, uint8_t *irk){
   int err;
