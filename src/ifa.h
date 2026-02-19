@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
-#include <zephyr/bluetooth/conn.h>
+//#include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/sys/byteorder.h>
@@ -33,7 +33,10 @@ int cmd_ifa_snapshot_take(const struct shell *sh, size_t argc, char *argv[]);
 int cmd_ifa_snapshot_restore();
 
 int cmd_ifa_stage1(const struct shell *sh, size_t argc, char *argv[]);
+int cmd_ifa_stage1_periph(const struct shell *sh);
 int cmd_ifa_stage2(const struct shell *sh, size_t argc, char *argv[]);
+int cmd_ifa_stage2_1_periph(const struct shell *sh);
+int cmd_ifa_stage2_2_periph(const struct shell *sh);
 int cmd_ifa_stage3(const struct shell *sh, size_t argc, char *argv[]);
 int cmd_ifa_stage4(const struct shell *sh, size_t argc, char *argv[]);
 

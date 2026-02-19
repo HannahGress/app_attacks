@@ -20,7 +20,6 @@
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/usb/usb_device.h>
 #include <zephyr/drivers/uart.h>
-#include <host/keys.h>
 #include <host/smp.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/logging/log.h>
@@ -60,6 +59,71 @@ static const char *security_err_str(enum bt_security_err err)
 	}
 }
 
+static const struct bt_data ad[] = {
+	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+	BT_DATA_BYTES(BT_DATA_UUID16_ALL,
+			  BT_UUID_16_ENCODE(BT_UUID_CSC_VAL),
+			  BT_UUID_16_ENCODE(BT_UUID_BAS_VAL))
+};
+
+static const struct bt_data sd[] = {
+	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+};
+
+static int advertising_start(void)
+{
+	int err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	if (err) {
+		shell_error(shell, "Advertising failed to start, reason: %d (%s)\n", err, bt_hci_err_to_str(err));
+		return err;
+	}
+
+	shell_print(shell,"Advertising successfully started\n");
+
+	return 0;
+}
+
+// wrapper for calling from outside
+int w_advertising_start(void)
+{
+	advertising_start();
+	return 0;
+}
+
+static int advertising_stop(void)
+{
+	int err = bt_le_adv_stop();
+	if (err) {
+		shell_error(shell, "Advertising failed to stop, reason: %d (%s)\n", err, bt_hci_err_to_str(err));
+		return err;
+	}
+
+	shell_print(shell, "Advertising successfully stoped\n");
+
+	return 0;
+}
+
+static int cmd_advertise(const struct shell *sh, size_t argc, char *argv[])
+{
+	const char *action;
+
+	if (argc != 2) {
+		shell_error(sh, "Wrong number of arguments.");
+		shell_help(sh);
+		return SHELL_CMD_HELP_PRINTED;
+	}
+
+	action = argv[1];
+	if (!strcmp(action, "start")) {
+		return advertising_start();
+	} else if (!strcmp(action, "stop")) {
+		return advertising_stop();
+	} else {
+		shell_help(sh);
+		return SHELL_CMD_HELP_PRINTED;
+	}
+}
+
 // as soon as the callback function is called it listens to adv events until stop_advertising() is called
 static void scan_started(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 			 struct net_buf_simple *ad)
@@ -80,20 +144,13 @@ static void scan_started(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 		shell_print(shell, "[DEVICE]: %s, AD evt type %u, AD data len %u, RSSI %i",
 		   dev, type, ad->len, rssi);
 	}
-
-	//err = bt_le_scan_stop();
-	//if (err) {
-	//	shell_print(shell,"Stop LE scan failed (err %d)", err);
-	//}
 }
 
 static int scan_start(void)
 {
-	int err;
-
-	err = bt_le_scan_start(BT_LE_SCAN_ACTIVE, scan_started);
+	int err = bt_le_scan_start(BT_LE_SCAN_ACTIVE, scan_started);
 	if (err) {
-		shell_error(shell,"Scanning failed to start (err %d)", err);
+		shell_error(shell,"Scanning failed to start, reason: %d (%s)", err, bt_hci_err_to_str(err));
 		return err;
 	} else {
 		shell_print(shell,"Scanning successfully started");
@@ -104,12 +161,10 @@ static int scan_start(void)
 
 static int scan_stop(void)
 {
-	int err;
-
-	err = bt_le_scan_stop();
+	int err = bt_le_scan_stop();
 
 	if (err) {
-		shell_error(shell, "Stopping scanning failed (err %d)", err);
+		shell_error(shell, "Stopping scanning failed, reason: %d (%s)", err, bt_hci_err_to_str(err));
 		return err;
 	} else {
 		shell_print(shell, "Scan successfully stopped");
@@ -120,7 +175,7 @@ static int scan_stop(void)
 
 static int cmd_scan(const struct shell *sh, size_t argc, char *argv[])
 {
-	const char *action;
+	const char *action = argv[1];
 
 	if (argc != 2) {
 		shell_error(sh, "Wrong number of arguments.");
@@ -128,17 +183,16 @@ static int cmd_scan(const struct shell *sh, size_t argc, char *argv[])
 		return SHELL_CMD_HELP_PRINTED;
 	}
 
-	action = argv[1];
 	if (!strcmp(action, "start")) {
 		return scan_start();
-	} else if (!strcmp(action, "stop")) {
-		return scan_stop();
-	} else {
-		shell_help(sh);
-		return SHELL_CMD_HELP_PRINTED;
 	}
 
-	return 0;
+	if (!strcmp(action, "stop")) {
+		return scan_stop();
+	}
+
+	shell_help(sh);
+	return SHELL_CMD_HELP_PRINTED;
 }
 
 static int cmd_connect(const struct shell *sh, size_t argc, char *argv[])
@@ -150,27 +204,26 @@ static int cmd_connect(const struct shell *sh, size_t argc, char *argv[])
 
 	err = bt_addr_le_from_str(argv[1], argv[2], &addr);
 	if (err) {
-		shell_error(sh, "Invalid peer address (err %d)", err);
+		shell_error(sh, "Invalid peer address, reason: %d (%s)", err, bt_hci_err_to_str(err));
 		return err;
 	}
-
 
 	struct bt_conn_le_create_param *create_params =
 		BT_CONN_LE_CREATE_PARAM(options,
 					BT_GAP_SCAN_FAST_INTERVAL,
 					BT_GAP_SCAN_FAST_INTERVAL);
 
-	err = bt_conn_le_create(&addr, create_params, BT_LE_CONN_PARAM_DEFAULT,
-				&conn);
-	if (err) {
-		shell_error(sh, "Connection failed (%d)", err);
-		return -ENOEXEC;
-	} else {
-		shell_print(sh, "Connection pending");
+	err = bt_conn_le_create(&addr, create_params, BT_LE_CONN_PARAM_DEFAULT, &conn);
 
-		/* unref connection obj in advance as app user */
-		bt_conn_unref(conn);
+	if (err) {
+		shell_error(sh, "Connection failed (%s)", bt_hci_err_to_str(err));
+		return -ENOEXEC;
 	}
+
+	shell_print(sh, "Connection pending");
+
+	// unref connection obj in advance as app user
+	bt_conn_unref(conn);
 
 	return 0;
 }
@@ -192,8 +245,8 @@ static int cmd_disconnect(const struct shell *sh, size_t argc, char *argv[])
 
 		err = bt_addr_le_from_str(argv[1], argv[2], &addr);
 		if (err) {
-			shell_error(sh, "Invalid peer address (err %d)",
-					err);
+			shell_error(sh, "Invalid peer address, reason: %d (%s)", err,
+					bt_hci_err_to_str(err));
 			return err;
 		}
 
@@ -207,7 +260,7 @@ static int cmd_disconnect(const struct shell *sh, size_t argc, char *argv[])
 
 	err = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
 	if (err) {
-		shell_error(sh, "Disconnection failed (err %d)", err);
+		shell_error(sh, "Disconnection failed, reason: %d (%s)", err, bt_hci_err_to_str(err));
 		return err;
 	}
 
@@ -224,8 +277,8 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	if (err) {
-		shell_error(shell, "connected(): Failed to connect to %s (%u)\n", addr,
-			   err);
+		shell_error(shell, "connected(): Failed to connect to %s, reason: %d (%s)\n", addr, err,
+			   bt_hci_err_to_str(err));
 		bt_conn_unref(default_conn);
 		default_conn = NULL;
 		conn = NULL;
@@ -236,19 +289,16 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	int info_err = bt_conn_get_info(conn, &conn_info);
 	if (info_err) {
-		shell_error(shell, "Failed to get connection info (%d).\n", info_err);
+		shell_error(shell, "Failed to get connection info, reason: %d (%s).\n", info_err, bt_hci_err_to_str(info_err));
 		return;
 	}
 
-	if (default_conn != NULL) {
+	if (default_conn) {
 		bt_conn_unref(default_conn);
 	}
 	default_conn = bt_conn_ref(conn);
-
 	is_connected = true;
-
-	k_sem_give(&conn_sem); // Signal that connection is complete
-
+	k_sem_give(&conn_sem); 	// Signal that connection is complete
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -261,12 +311,9 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	err = bt_conn_get_info(conn, &conn_info);
 	if (err) {
-		shell_error(shell, "Failed to get connection info (%d).\n", err);
+		shell_error(shell, "Failed to get connection info, reason: %d (%s).\n", err, bt_hci_err_to_str(err));
 		return;
 	}
-
-	shell_print(shell, "%s: %s role %u, reason %u %s", __func__, addr, conn_info.role,
-		   reason, bt_hci_err_to_str(reason));
 
 	if (default_conn != conn) {
 		return;
@@ -275,12 +322,9 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	bt_conn_unref(default_conn);
 	default_conn = NULL;
 
-	bt_conn_unref(conn);
-	conn = NULL;
-
-	shell_print(shell,"Disconnected (reason %u)", reason);
-
 	k_sem_give(&disconn_sem); // Signal that disconnection is complete
+
+	shell_print(shell,"Disconnected: %s, reason 0x%02x %s\n", addr, reason, bt_hci_err_to_str(reason));
 }
 
 static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err)
@@ -292,7 +336,7 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
 	if (!err) {
 		shell_print(shell, "Security with %s changed to level %u", addr, level);
 	} else {
-		shell_error(shell, "Security failed: %s level %u err %d", addr, level, err);
+		shell_error(shell, "Security failed: %s level %u reason %d (%s)", addr, level, err, bt_hci_err_to_str(err));
 	}
 	k_sleep(K_MSEC(500));
 	k_sem_give(&bond_sem); // Signal that bonding is complete
@@ -318,8 +362,8 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err err)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	shell_print(shell, "Me: Pairing failed with %s reason: %s (%d)", addr,
-			security_err_str(err), err);
+	shell_print(shell, "Pairing failed with %s, reason: %d (%s)", addr, err,
+			security_err_str(err));
 }
 
 static void pairing_complete(struct bt_conn *conn, bool bonded)
@@ -328,7 +372,7 @@ static void pairing_complete(struct bt_conn *conn, bool bonded)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	shell_print(shell, "pairing_complete(): %s with %s", bonded ? "Bonded" : "Paired",
+	shell_print(shell, "Pairing complete: %s with %s", bonded ? "Bonded" : "Paired",
 			addr);
 }
 
@@ -369,8 +413,8 @@ static int cmd_pairing_delete(const struct shell *sh, size_t argc, char *argv[])
 	if (strcmp(argv[1], "all") == 0) {
 		err = bt_unpair(selected_id, NULL);
 		if (err) {
-			shell_error(sh, "Failed to clear pairings (err %d)",
-				  err);
+			shell_error(sh, "Failed to clear pairings, reason: %d %s", err,
+				  bt_hci_err_to_str(err));
 			return err;
 		} else {
 			shell_print(sh, "Pairings successfully cleared");
@@ -393,7 +437,7 @@ static int cmd_pairing_delete(const struct shell *sh, size_t argc, char *argv[])
 
 	err = bt_unpair(selected_id, &addr);
 	if (err) {
-		shell_error(sh, "Failed to clear pairing (err %d)", err);
+		shell_error(sh, "Failed to clear pairing, reason: %d (%s)", err, bt_hci_err_to_str(err));
 	} else {
 		shell_print(sh, "Pairing successfully cleared");
 	}
@@ -414,7 +458,7 @@ static int cmd_security(const struct shell *sh)
 
 	err = bt_conn_set_security(default_conn, sec);
 	if (err) {
-		shell_error(sh, "Setting security failed (err %d)", err);
+		shell_error(sh, "Setting security failed, reason: %d (%s)", err, bt_hci_err_to_str(err));
 	}
 
 	return err;
@@ -448,18 +492,18 @@ static int cmd_init(const struct shell *sh)
 {
 	int err;
 	shell = sh;
-	ifa_init(sh);
+	//ifa_init(sh);
 
 	err = bt_enable(NULL);
 	if (err) {
-		printf("Bluetooth init failed (err %d)\n", err);
+		printf("Bluetooth init failed, reason: %d (%s)\n", err, bt_hci_err_to_str(err));
 		return -1;
 	}
 	printf("Bluetooth initialized\n");
 
 	err = settings_load();
 	if(err < 0){
-		printf("Loading settings failed with err: %d\n", err);
+		printf("Loading settings failed, reason: %d (%s)\n", err, bt_hci_err_to_str(err));
 		printf("continuing anyways\n");
 	} else {
 		printf("Settings loaded\n");
@@ -469,14 +513,14 @@ static int cmd_init(const struct shell *sh)
 
 	err = bt_conn_auth_info_cb_register(&auth_info_cb);
 	if (err) {
-		printf("Failed to register authorization info callbacks.\n");
+		printf("Failed to register authorization info callbacks, reason: %d (%s).\n", err, bt_hci_err_to_str(err));
 		return -1;
 	}
 	printf("Bluetooth authentication info callbacks registered.\n");
 
 	err = bt_conn_auth_cb_register(&conn_auth_callbacks);
 	if (err) {
-		printf("Failed to register authorization callbacks. (err %d)\n", err);
+		printf("Failed to register authorization callbacks, reason: %d ( %s)\n", err, bt_hci_err_to_str(err));
 		return -1;
 	}
 
@@ -484,7 +528,7 @@ static int cmd_init(const struct shell *sh)
 
 	err = bt_conn_cb_register(&connection_callbacks);
 	if (err) {
-		printf("Failed to register connection callbacks. (err %d)\n", err);
+		printf("Failed to register connection callbacks, reason: %d (%s)\n", err, bt_hci_err_to_str(err));
 		return -1;
 	}
 	printf("Bluetooth connection callbacks registered.\n");
@@ -564,6 +608,7 @@ static int cmd_default_handler(const struct shell *sh, size_t argc, char **argv)
 
 SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD(init, NULL, HELP_NONE, cmd_init),
+	SHELL_CMD_ARG(advertise, NULL, "<value: start, stop>", cmd_advertise, 2, 0),
 	SHELL_CMD_ARG(scan, NULL, "<value: start, stop>", cmd_scan, 2, 0),
 	SHELL_CMD_ARG(connect, NULL, HELP_NONE, cmd_connect, 3, 0),
 	SHELL_CMD_ARG(disconnect, NULL, HELP_NONE, cmd_disconnect, 3, 0),
@@ -581,7 +626,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD_ARG(restore, NULL, "", cmd_ifa_snapshot_restore, 1, 0),
 
 	SHELL_CMD_ARG(ifa1, NULL, "", cmd_ifa_stage1, 3, 0),
+	SHELL_CMD(ifa1_p, NULL, HELP_NONE, cmd_ifa_stage1_periph),
 	SHELL_CMD_ARG(ifa2, NULL, "", cmd_ifa_stage2, 4, 0),
+	SHELL_CMD(ifa2_1_p, NULL, HELP_NONE, cmd_ifa_stage2_1_periph),
+	SHELL_CMD(ifa2_2_p, NULL, HELP_NONE, cmd_ifa_stage2_2_periph),
 	SHELL_CMD_ARG(ifa3, NULL, "", cmd_ifa_stage3, 1, 0),
 	SHELL_CMD_ARG(ifa4, NULL, "", cmd_ifa_stage4, 3, 0),
 	SHELL_CMD_ARG(ifa, NULL, "ifa addr addr_type n \n addr is target address formatted as "HELP_ADDR_LE" \n n is number of bondings\n", cmd_ifa, 4, 0));
