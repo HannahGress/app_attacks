@@ -1,2 +1,47 @@
-# app_attacks
-This repo contains the application layer for a framework implementing standards-compliant BLE attacks. Modifications done for the attacks in the BLE stack can be found in the "zephyr_attacks" folder.
+# BLE Testing Framework
+If you only want to use the framework, you can download the prebuild .hex files for the nRF53840 DK and dongle as well as the nRF54L15 DK.
+If you want to make modifications tot he project, follow the steps below. I used CLion as an IDE. The instructions are written for Windows, but can be adapted to Linux and Mac.
+The project consist of two repositories, a fork of the [Zephyr project](https://github.com/HannahGress/zephyr_attacks), and this repository. When setting up the project, both will be combined.  
+
+1. In your IDE, import the project as "Project from Version Control"
+2. Open cmd and install the required dependencies as described [here](https://docs.zephyrproject.org/latest/develop/getting_started/index.html#install-dependencies) under the menu point "Install dependencies"
+3. Install west. This can be done as follows (mixture and modification from [here](https://docs.zephyrproject.org/latest/develop/getting_started/index.html#get-zephyr-and-install-python-dependencies)
+   and [here](https://docs.nordicsemi.com/bundle/ncs-1.5.1/page/zephyr/guides/west/manifest.html#west-manifests)
+   (Example 1.2: “Rolling release” Zephyr downstream))
+   1. Navigate into the project folder, e.g. `D:\CLionWorkspaces\ble-framework`
+   2. Create and activate a virtual environment
+   3. Install `west` with `pip install west`
+   4. Initialize `west` by running `west init -l app_attacks`
+   5. Run `west update`
+   6. Open the cmd as admin. Create a symlink for `zephyr\_attacks` (Windows: `mklink /D zephyr zephyr_attacks`)
+   7. Return to cmd as normal user. Export a Zephyr `CMake`package. This allows `CMake` to automatically load boilerplate code required for building Zephyr applications. Command: `west zephyr-export`
+   8. Install Python dependencies using west packages with `west packages pip --install`
+4. Install Zephyr’s `scripts\requirements.txt` with `pip install -r zephyr_attacks\scripts\requirements.txt`
+5. Install the Zephyr SDK by navigating into the `zephyr_attacks` folder and calling `west sdk install` ([source](https://docs.zephyrproject.org/latest/develop/getting_started/index.html#install-the-zephyr-sdk))
+6. [Information only] To update the Zephyr project source code, run the following commands while being in the `zephyr_attacks` folder ([source](https://zephyr-docs.listenai.com/guides/beyond-GSG.html#keeping-zephyr-updated)):
+   ```
+   git pull
+   west update
+   ```
+   If the location of `zephyr` (in our case `zephyr_attacks`) changes, you also need to export the `CMake` package again (`west zephyr-export`).
+7. Change the remote repos with
+    ```
+    git remote add origin https://github.com/HannahGress/zephyr_attacks.git
+    git remote add upstream https://github.com/zephyrproject-rtos/zephyr.git
+    ```
+    After that, origin = your fork, upstream = Zephyr main ([source, modified](https://docs.zephyrproject.org/latest/contribute/guidelines.html#contribution-workflow))
+8. Maybe you need to connect your local repo to the real `main` branch on GitHub
+   ```
+   git fetch origin
+   git checkout -b main origin/main
+   ```
+   Now main exists locally and tracks your GitHub fork’s branch. After running `git branch -a` you should see a branch called `remotes/origin/main`.
+9. Switch to your IDE.
+10. Navigate into the `app_attacks/src/CMakeLists.txt` file and comment in/out the respective line for your board
+11. Right click on the `CMakeLists.txt` file and select `Load CMake Project`.
+12. Got to `File` $\rightarrow$ `Settings` $\rightarrow$ `Build, Execution, Deployment` and configure the `Toolchain`
+    and `CMake` as described [here](https://docs.zephyrproject.org/latest/develop/tools/clion.html#configure-the-toolchain-and-cmake-profile). Set also a python interpreter under the menu point `Python Interpreter`.
+13. The IDE should create the build files automatically. To build the project, run `Build` $\rightarrow$ `Build zephyr_final` or click the hammer icon
+14. [Information only] In case your built project does not contain all changes you made, go to `Tools` $\rightarrow$ `CMake` $\rightarrow$ `Reset Cache and Reload Project`. Then build again.
+15. To flash the built project to your DK or dongle, you can use [`west flash`](https://docs.zephyrproject.org/latest/develop/west/build-flash-debug.html#flashing-west-flash) or Nordic Semiconductor's [Programmer App](https://www.nordicsemi.com/Products/Development-tools/nRF-Programmer). The built .hex file is located under `app_attacks\cmake-build-debug\zephyr\zephyr.hex`
+16. If you want to add debugging, follow [these steps](https://docs.zephyrproject.org/latest/develop/tools/clion.html#configure-zephyr-parameters-for-debug)
