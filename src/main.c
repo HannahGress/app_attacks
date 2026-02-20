@@ -583,7 +583,7 @@ static int cmd_scda(const struct shell *sh, size_t argc, char *argv[])
 
 int main(void)
 {
-	printf("Hello World! %s\n", CONFIG_BOARD_TARGET);
+	printf("BLE Testing Framework %s\n", CONFIG_BOARD_TARGET);
 
 	return 0;
 }
