@@ -38,7 +38,7 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
    Now main exists locally and tracks your GitHub fork’s branch. After running `git branch -a` you should see a branch called `remotes/origin/main`.
 9. Switch to your IDE.
 10. Navigate into the `app_attacks/src/CMakeLists.txt` file and comment in/out the respective line for your board
-11. Right click on the `CMakeLists.txt` file and select `Load CMake Project`.
+11. Right-click on the `CMakeLists.txt` file and select `Load CMake Project`.
 12. Got to `File` $\rightarrow$ `Settings` $\rightarrow$ `Build, Execution, Deployment` and configure the `Toolchain`
     and `CMake` as described [here](https://docs.zephyrproject.org/latest/develop/tools/clion.html#configure-the-toolchain-and-cmake-profile). Set also a python interpreter under the menu point `Python Interpreter`.
 13. The IDE should create the build files automatically. To build the project, run `Build` $\rightarrow$ `Build zephyr_final` or click the hammer icon
