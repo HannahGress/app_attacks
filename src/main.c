@@ -24,8 +24,6 @@
 #include <zephyr/settings/settings.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
-#include <zephyr/sys/barrier.h>
-
 #include "ifa.h"
 
 struct bt_conn *default_conn;
