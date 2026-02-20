@@ -1,4 +1,86 @@
 # BLE Testing Framework
+
+## Usage
+
+### Attacks
+The BLE frameworks contains five still standards-compliant attacks on BLE for Peripheral (4) and Central (5) devices.
+The attacks are:
+- [BLE Injection‑free Attack](https://link.springer.com/article/10.1007/s12652-019-01502-z)
+- [Key Negotiation Of Bluetooth (KNOB) Attack](https://dl.acm.org/doi/abs/10.1145/3394497)
+- [Nino Man-In-The-Middle Attack](https://ieeexplore.ieee.org/document/4401672?denied=)
+- Secure Connections Downgrade Attack
+- [Secure Connections Only mode Downgrade Attack](https://www.usenix.org/conference/usenixsecurity20/presentation/zhang-yue) (Central only)
+
+### Commands
+At each use or reset, initialize the BLE module with `bleframework init`. To see the available commands, type `bleframework`.
+
+The commands for each attack are listed below.
+
+#### BLE Injection‑free Attack
+_Attack on Peripheral:_
+
+If the device advertises its presence continuously, the attack can be conducted automatically.
+```
+bleframework scan start
+// wait until the device's BDA appears (the device must be very close!)
+// then launch the attack
+bleframework ifa <BDA (public|private)> <n> 
+// n specifies with how many fake IDs (fake BDAs) should be paired to fill the device's bonding list
+```
+
+If the pairing must be initiated by the user
+```
+bleframework scan start
+// wait until the device's BDA appears (the device must be very close!)
+// then launch the attack
+// ifa stage 1: initial pairing; pairing with the real ID (BDA); ID 0 
+bleframework ifa1 <BDA (public|private)>
+// call ifa stage 2 n times
+// n specifies with how many fake IDs (fake BDAs) should be paired to fill the device's bonding list
+bleframework ifa2 <BDA (public|private)>
+// ifa stage 3: resetting to initial ID (ID 0)
+bleframework ifa3
+// ifa stage 4: connect to device to see if the bonding information from ID 0 are still stored
+bleframework ifa4 <BDA (public|private)>
+```
+_Attack on Central:_
+
+The attack on a Central device cannot be conducted automatically, since the connection and pairing is always initiated by the Central device and we are the Peripheral here
+
+```
+// ifa stage 1
+// we advertise and our Central pairs with us
+bleframework advertise start
+// when connected
+bleframework ifa1
+// repeat stage 2.1 - 2.2 n times:
+// ifa stage 2.1: resetting ID to new ID and start advertising
+bleframework ifa2_1_p
+// Central pairs with us
+// ifa stage 2.2: disconnection and deletion of bonding data from the Central
+bleframework ifa2_2_p 
+// ifa stage 3: resetting to initial ID (ID 0) 
+bleframework ifa3
+// ifa stage 4: we advertise, the Central connects to us and we can see, if it has still stored our bonding data
+bleframework advertise start
+```
+
+#### KNOB Attack
+Setting key size to seven with `knob true` and back to 16 with `knob false`. You can also set arbitrary sizes with `knob [7|8|9|10|11|12|13|14|15|16]`.
+The commands set the key size for both roles, Central and Peripheral. Therefore, only advertising or scanning and then pairing is necessary to launch the attack.  
+
+#### Nino Man-In-The-Middle Attack
+This attack is implemented by default, because it makes testing easier.
+
+#### Secure Connections Downgrade Attack
+Downgrading to Legacy Pairing with `scda true` or disable with `scda false`.
+The commands set the key size for both roles, Central and Peripheral. Therefore, only advertising or scanning and then pairing is necessary to launch the attack.
+
+#### Secure Connections Only mode Downgrade Attack
+This attack is only applicable to Central devices.
+
+
+## Installation or Modification
 If you only want to use the framework, you can download the prebuild .hex files for the nRF53840 DK and dongle as well as the nRF54L15 DK.
 If you want to make modifications tot he project, follow the steps below. I used CLion as an IDE. The instructions are written for Windows, but can be adapted to Linux and Mac.
 The project consist of two repositories, a fork of the [Zephyr project](https://github.com/HannahGress/zephyr_attacks), and this repository. When setting up the project, both will be combined.  
