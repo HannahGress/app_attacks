@@ -106,7 +106,7 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
    west update
    ```
    If the location of `zephyr` (in our case `zephyr_attacks`) changes, you also need to export the `CMake` package again (`west zephyr-export`).
-7. Change the remote repos with
+7. Stay in the `zephyr_attacks` folder and change the remote repos. Maybe you need to rename your origin before (`git remote rename zephyr_attacks origin`):
     ```
     git remote add origin https://github.com/HannahGress/zephyr_attacks.git
     git remote add upstream https://github.com/zephyrproject-rtos/zephyr.git
