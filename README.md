@@ -85,7 +85,7 @@ If you only want to use the framework, you can download the prebuild .hex files 
 If you want to make modifications tot he project, follow the steps below. I used CLion as an IDE. The instructions are written for Windows, but can be adapted to Linux and Mac.
 The project consist of two repositories, a fork of the [Zephyr project](https://github.com/HannahGress/zephyr_attacks), and this repository. When setting up the project, both will be combined.  
 
-1. In your IDE, import the project as "Project from Version Control"
+1. In your IDE, import the project (= only this repo) as "Project from Version Control"
 2. Open cmd and install the required dependencies as described [here](https://docs.zephyrproject.org/latest/develop/getting_started/index.html#install-dependencies) under the menu point "Install dependencies"
 3. Install west. This can be done as follows (mixture and modification from [here](https://docs.zephyrproject.org/latest/develop/getting_started/index.html#get-zephyr-and-install-python-dependencies)
    and [here](https://docs.nordicsemi.com/bundle/ncs-1.5.1/page/zephyr/guides/west/manifest.html#west-manifests)
