@@ -81,7 +81,7 @@ This attack is only applicable to Central devices.
 
 
 ## Installation or Modification
-If you only want to use the framework, you can download the prebuild .hex files for the nRF53840 DK and dongle as well as the nRF54L15 DK.
+If you only want to use the framework, you can download the pre-build .hex files for the nRF53840 DK and dongle as well as the nRF54L15 DK.
 If you want to make modifications tot he project, follow the steps below. I used CLion as an IDE. The instructions are written for Windows, but can be adapted to Linux and Mac.
 The project consist of two repositories, a fork of the [Zephyr project](https://github.com/HannahGress/zephyr_attacks), and this repository. When setting up the project, both will be combined.  
 
