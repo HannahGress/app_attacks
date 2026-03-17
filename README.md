@@ -95,9 +95,8 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
    3. Install `west` with `pip install west`
    4. Initialize `west` by running `west init -l app_attacks`
    5. Run `west update`
-   6. Open the cmd as admin. Create a symlink for `zephyr\_attacks` (Windows: `mklink /D zephyr zephyr_attacks`)
-   7. Return to cmd as normal user. Export a Zephyr `CMake`package. This allows `CMake` to automatically load boilerplate code required for building Zephyr applications. Command: `west zephyr-export`
-   8. Install Python dependencies using west packages with `west packages pip --install`
+   6. Return to cmd as normal user. Export a Zephyr `CMake`package. This allows `CMake` to automatically load boilerplate code required for building Zephyr applications. Command: `west zephyr-export`
+   7. Install Python dependencies using west packages with `west packages pip --install`
 4. Install Zephyr’s `scripts\requirements.txt` with `pip install -r zephyr_attacks\scripts\requirements.txt`
 5. Install the Zephyr SDK by navigating into the `zephyr_attacks` folder and calling `west sdk install` ([source](https://docs.zephyrproject.org/latest/develop/getting_started/index.html#install-the-zephyr-sdk))
 6. [Information only] To update the Zephyr project source code, run the following commands while being in the `zephyr_attacks` folder ([source](https://zephyr-docs.listenai.com/guides/beyond-GSG.html#keeping-zephyr-updated)):
