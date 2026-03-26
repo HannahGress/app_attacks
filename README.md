@@ -108,7 +108,6 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
    If the location of `zephyr` (in our case `zephyr_attacks`) changes, you also need to export the `CMake` package again (`west zephyr-export`).
 7. Stay in the `zephyr_attacks` folder and change the remote repos. Maybe you need to rename your origin before (`git remote rename zephyr_attacks origin`):
     ```
-    git remote add origin https://github.com/HannahGress/zephyr_attacks.git
     git remote add upstream https://github.com/zephyrproject-rtos/zephyr.git
     ```
     After that, origin = your fork, upstream = Zephyr main ([source, modified](https://docs.zephyrproject.org/latest/contribute/guidelines.html#contribution-workflow))
@@ -119,11 +118,10 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
    ```
    Now main exists locally and tracks your GitHub fork’s branch. After running `git branch -a` you should see a branch called `remotes/origin/main`.
 9. Switch to your IDE.
-10. Navigate into the `app_attacks/src/CMakeLists.txt` file and comment in/out the respective line for your board
-11. Right-click on the `CMakeLists.txt` file and select `Load CMake Project`.
-12. Got to `File` $\rightarrow$ `Settings` $\rightarrow$ `Build, Execution, Deployment` and configure the `Toolchain`
+10. Right-click on the `CMakeLists.txt` file and select `Load CMake Project`.
+11. Got to `File` $\rightarrow$ `Settings` $\rightarrow$ `Build, Execution, Deployment` and configure the `Toolchain`
     and `CMake` as described [here](https://docs.zephyrproject.org/latest/develop/tools/clion.html#configure-the-toolchain-and-cmake-profile). Set also a python interpreter under the menu point `Python Interpreter`.
-13. The IDE should create the build files automatically. To build the project, run `Build` $\rightarrow$ `Build zephyr_final` or click the hammer icon
-14. [Information only] In case your built project does not contain all changes you made, go to `Tools` $\rightarrow$ `CMake` $\rightarrow$ `Reset Cache and Reload Project`. Then build again.
-15. To flash the built project to your DK or dongle, you can use [`west flash`](https://docs.zephyrproject.org/latest/develop/west/build-flash-debug.html#flashing-west-flash) or Nordic Semiconductor's [Programmer App](https://www.nordicsemi.com/Products/Development-tools/nRF-Programmer). The built .hex file is located under `app_attacks\cmake-build-debug\zephyr\zephyr.hex`
-16. If you want to add debugging, follow [these steps](https://docs.zephyrproject.org/latest/develop/tools/clion.html#configure-zephyr-parameters-for-debug)
+12. The IDE should create the build files automatically. To build the project, run `Build` $\rightarrow$ `Build zephyr_final` or click the hammer icon
+13. [Information only] In case your built project does not contain all changes you made, go to `Tools` $\rightarrow$ `CMake` $\rightarrow$ `Reset Cache and Reload Project`. Then build again.
+14. To flash the built project to your DK or dongle, you can use [`west flash`](https://docs.zephyrproject.org/latest/develop/west/build-flash-debug.html#flashing-west-flash) or Nordic Semiconductor's [Programmer App](https://www.nordicsemi.com/Products/Development-tools/nRF-Programmer). The built .hex file is located under `app_attacks\cmake-build-debug\zephyr\zephyr.hex`
+15. If you want to add debugging, follow [these steps](https://docs.zephyrproject.org/latest/develop/tools/clion.html#configure-zephyr-parameters-for-debug)

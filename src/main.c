@@ -12,7 +12,8 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include <controller/ll_sw/nordic/hal/nrf5/radio/radio.h>
+#include <controller/ll_sw/nordic/hal/nrf5/radio/radio_nrf5_ppi.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
@@ -25,11 +26,14 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
 #include "ifa.h"
+#include "gatt_communication.h"
+#include "zephyr/random/random.h"
 
 struct bt_conn *default_conn;
 uint8_t selected_id = BT_ID_DEFAULT;
 const struct shell *shell;
 static bool is_connected = false;
+static bool is_benchmarking = false;
 
 static const char *security_err_str(enum bt_security_err err)
 {
@@ -103,7 +107,7 @@ static int advertising_stop(void)
 
 static int cmd_advertise(const struct shell *sh, size_t argc, char *argv[])
 {
-	const char *action;
+	const char *action = argv[1];
 
 	if (argc != 2) {
 		shell_error(sh, "Wrong number of arguments.");
@@ -111,7 +115,6 @@ static int cmd_advertise(const struct shell *sh, size_t argc, char *argv[])
 		return SHELL_CMD_HELP_PRINTED;
 	}
 
-	action = argv[1];
 	if (!strcmp(action, "start")) {
 		return advertising_start();
 	} else if (!strcmp(action, "stop")) {
@@ -533,6 +536,121 @@ static int cmd_init(const struct shell *sh)
 	return 0;
 }
 
+static void energy_consumption_measurement_start() {
+	hal_radio_ccm_endcrypt_time_capture_ppi_config();
+	hal_radio_nrf_ppi_channels_enable(BIT(HAL_CRYPT_END_TIME_CAPTURE_PPI));
+}
+
+static void energy_consumption_measurement_stop() {
+	hal_radio_nrf_ppi_channels_disable(BIT(HAL_CRYPT_END_TIME_CAPTURE_PPI));
+}
+
+static void benchmarking_start() {
+	is_benchmarking = true;
+	energy_consumption_measurement_start();
+}
+
+static void benchmarking_stop() {
+	is_benchmarking = false;
+	energy_consumption_measurement_stop();
+}
+
+//uint32_t radio_ccm_is_done_m(void)
+//{
+	// shell_print(sh, "Delta: %i", delta_encryption_time);
+//}
+
+
+static int cmd_benchmarking(const struct shell *sh, size_t argc, char *argv[])
+{
+	const char *action = argv[1];
+
+	if (argc != 2) {
+		shell_error(sh, "Wrong number of arguments.");
+		shell_help(sh);
+		return SHELL_CMD_HELP_PRINTED;
+	}
+
+	if (!strcmp(action, "start")) {
+		benchmarking_start();
+	} else if (!strcmp(action, "stop")) {
+		benchmarking_stop();
+	} else {
+		shell_help(sh);
+		return SHELL_CMD_HELP_PRINTED;
+	}
+	return 0;
+}
+
+static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
+{
+	if(is_benchmarking) {
+		delta_encryption_time = 0;
+	}
+
+	const char *count = NULL;
+	int n = 1; // number of loops. default 1 (if no second argument is specified)
+
+	if (argc > 2) {
+		shell_error(sh, "Wrong number of arguments.");
+		shell_help(sh);
+		return SHELL_CMD_HELP_PRINTED;
+	}
+
+	if (argc == 2) {
+		count = argv[1];
+		char *endptr;
+		// Convert value in *number into integer
+		n = (int)strtol(count, &endptr, 10);
+		if (*endptr != '\0') {
+			shell_error(sh, "Argument must be numeric.");
+			return -EINVAL;
+		}
+	}
+
+	// If *number contains a value <= 0 -> no packets can be sent, so we throw an error
+	if (n <= 0) {
+		shell_error(sh, "Number of sent packets must be at least 1.");
+		return -EINVAL;
+	}
+
+	// if n is > 0 -> packets can be sent
+	if (n > 0 && default_conn) {
+		for(int i=0; i<n; i++) {
+			const int err = send_notification(default_conn, &notification_srv.attrs[2]);
+			if(err) {
+				shell_error(sh, "Failed to send data. Reason: err=%d", err);
+			}
+		}
+	} else {
+		shell_print(sh, "Not connected");
+	}
+
+	shell_print(sh, "Result: %i", delta_encryption_time);
+	return 0;
+}
+
+static int cmd_service_and_characteristic_discovery(const struct shell *sh, size_t argc, char *argv[]) {
+	int err = bt_gatt_discover(default_conn, &discover_params);
+	if (err) {
+		shell_error(sh,"Service and Characteristic discovery failed (err %d)\n", err);
+	}
+	return 0;
+}
+
+static int cmd_subscribe(const struct shell *sh, size_t argc, char *argv[])
+{
+	int err = bt_gatt_subscribe(default_conn, &subscribe_params);
+	printk("subscribe err=%d value_handle=0x%04x ccc_handle=0x%04x\n",
+	   err, subscribe_params.value_handle, subscribe_params.ccc_handle);
+	if (err) {
+		shell_error(sh,"Subscribe failed (err %d)\n", err);
+	} else {
+		shell_print(sh,"Subscribed\n");
+	}
+	return 0;
+}
+
 static int cmd_knob(const struct shell *sh, size_t argc, char *argv[])
 {
 	if (argc != 2) {
@@ -629,6 +747,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD(ifa2_2_p, NULL, HELP_NONE, cmd_ifa_stage2_2_periph),
 	SHELL_CMD_ARG(ifa3, NULL, "", cmd_ifa_stage3, 1, 0),
 	SHELL_CMD_ARG(ifa4, NULL, "", cmd_ifa_stage4, 3, 0),
-	SHELL_CMD_ARG(ifa, NULL, "ifa addr addr_type n \n addr is target address formatted as "HELP_ADDR_LE" \n n is number of bondings\n", cmd_ifa, 4, 0));
+	SHELL_CMD_ARG(ifa, NULL, "ifa addr addr_type n \n addr is target address formatted as "HELP_ADDR_LE" \n n is number of bondings\n", cmd_ifa, 4, 0),
+	SHELL_CMD(send_data, NULL, HELP_NONE, cmd_send_data),
+	SHELL_CMD_ARG(benchmarking, NULL, "<value: start, stop>", cmd_benchmarking, 2, 0),
+	SHELL_CMD(discover, NULL, "", cmd_service_and_characteristic_discovery),
+	SHELL_CMD(subscribe, NULL, "", cmd_subscribe),);
 
 SHELL_CMD_REGISTER(bleframework, &cmds, "Bluetooth shell commands", cmd_default_handler);
