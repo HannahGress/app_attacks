@@ -489,6 +489,16 @@ static struct bt_conn_auth_info_cb auth_info_cb = {
 	.bond_deleted = bond_deleted,
 };
 
+// use NRF_TIMER3 to capture event when BLE encryption is finished
+static void init_timer() {
+	NRF_TIMER3->MODE = TIMER_MODE_MODE_Timer;
+	NRF_TIMER3->BITMODE = TIMER_BITMODE_BITMODE_32Bit;
+	NRF_TIMER3->PRESCALER = 4;   // 1 MHz → 1 tick = 1 µs
+
+	NRF_TIMER3->TASKS_CLEAR = 1;
+	NRF_TIMER3->TASKS_START = 1;
+}
+
 static int cmd_init(const struct shell *sh)
 {
 	int err;
@@ -533,16 +543,18 @@ static int cmd_init(const struct shell *sh)
 	}
 	printf("Bluetooth connection callbacks registered.\n");
 
+	init_timer();
+
 	return 0;
 }
 
 static void energy_consumption_measurement_start() {
 	hal_radio_ccm_endcrypt_time_capture_ppi_config();
-	hal_radio_nrf_ppi_channels_enable(BIT(HAL_CRYPT_END_TIME_CAPTURE_PPI));
+	hal_radio_nrf_ppi_channels_enable(BIT(HAL_CRYPT_END_TIME_CAPTURE_PPI) | BIT(HAL_CRYPT_START_TIME_CAPTURE_PPI));
 }
 
 static void energy_consumption_measurement_stop() {
-	hal_radio_nrf_ppi_channels_disable(BIT(HAL_CRYPT_END_TIME_CAPTURE_PPI));
+	hal_radio_nrf_ppi_channels_disable(BIT(HAL_CRYPT_END_TIME_CAPTURE_PPI | BIT(HAL_CRYPT_START_TIME_CAPTURE_PPI)));
 }
 
 static void benchmarking_start() {
@@ -554,12 +566,6 @@ static void benchmarking_stop() {
 	is_benchmarking = false;
 	energy_consumption_measurement_stop();
 }
-
-//uint32_t radio_ccm_is_done_m(void)
-//{
-	// shell_print(sh, "Delta: %i", delta_encryption_time);
-//}
-
 
 static int cmd_benchmarking(const struct shell *sh, size_t argc, char *argv[])
 {
@@ -586,6 +592,7 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 {
 	if(is_benchmarking) {
 		delta_encryption_time = 0;
+		shell_print(sh, "Delta before sending: %u", delta_encryption_time);
 	}
 
 	const char *count = NULL;
@@ -625,9 +632,12 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 	} else {
 		shell_print(sh, "Not connected");
 	}
-
-	shell_print(sh, "Result: %i", delta_encryption_time);
 	return 0;
+}
+
+static void cmd_get_delta_encryption_time(const struct shell *sh, size_t argc, char *argv[]) {
+	shell_print(sh, "Start: %u, End: %u", t_start, t_end);
+	shell_print(sh, "Result: %u", delta_encryption_time);
 }
 
 static int cmd_service_and_characteristic_discovery(const struct shell *sh, size_t argc, char *argv[]) {
@@ -749,8 +759,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD_ARG(ifa4, NULL, "", cmd_ifa_stage4, 3, 0),
 	SHELL_CMD_ARG(ifa, NULL, "ifa addr addr_type n \n addr is target address formatted as "HELP_ADDR_LE" \n n is number of bondings\n", cmd_ifa, 4, 0),
 	SHELL_CMD(send_data, NULL, HELP_NONE, cmd_send_data),
-	SHELL_CMD_ARG(benchmarking, NULL, "<value: start, stop>", cmd_benchmarking, 2, 0),
+	SHELL_CMD_ARG(benchmark, NULL, "<value: start, stop>", cmd_benchmarking, 2, 0),
 	SHELL_CMD(discover, NULL, "", cmd_service_and_characteristic_discovery),
-	SHELL_CMD(subscribe, NULL, "", cmd_subscribe),);
+	SHELL_CMD(subscribe, NULL, "", cmd_subscribe),
+	SHELL_CMD(delta, NULL, "", cmd_get_delta_encryption_time));
 
 SHELL_CMD_REGISTER(bleframework, &cmds, "Bluetooth shell commands", cmd_default_handler);
