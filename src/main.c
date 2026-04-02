@@ -27,6 +27,7 @@
 #include <zephyr/shell/shell.h>
 #include "ifa.h"
 #include "gatt_communication.h"
+#include "benchmarking.h"
 #include "zephyr/random/random.h"
 
 struct bt_conn *default_conn;
@@ -548,67 +549,48 @@ static int cmd_init(const struct shell *sh)
 	return 0;
 }
 
-static void energy_consumption_measurement_start() {
-	hal_radio_ccm_endcrypt_time_capture_ppi_config();
-	hal_radio_nrf_ppi_channels_enable(BIT(HAL_CRYPT_END_TIME_CAPTURE_PPI) | BIT(HAL_CRYPT_START_TIME_CAPTURE_PPI));
-}
-
-static void energy_consumption_measurement_stop() {
-	hal_radio_nrf_ppi_channels_disable(BIT(HAL_CRYPT_END_TIME_CAPTURE_PPI | BIT(HAL_CRYPT_START_TIME_CAPTURE_PPI)));
-}
-
-static void benchmarking_start() {
-	is_benchmarking = true;
-	energy_consumption_measurement_start();
-}
-
-static void benchmarking_stop() {
-	is_benchmarking = false;
-	energy_consumption_measurement_stop();
-}
-
-static int cmd_benchmarking(const struct shell *sh, size_t argc, char *argv[])
-{
-	const char *action = argv[1];
-
-	if (argc != 2) {
-		shell_error(sh, "Wrong number of arguments.");
-		shell_help(sh);
-		return SHELL_CMD_HELP_PRINTED;
-	}
-
-	if (!strcmp(action, "start")) {
-		benchmarking_start();
-	} else if (!strcmp(action, "stop")) {
-		benchmarking_stop();
-	} else {
-		shell_help(sh);
-		return SHELL_CMD_HELP_PRINTED;
-	}
-	return 0;
-}
-
 static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 {
 	if(is_benchmarking) {
-		delta_encryption_time = 0;
-		shell_print(sh, "Delta before sending: %u", delta_encryption_time);
+		// delta_encryption_time = 0;
 	}
 
 	const char *count = NULL;
+	const char *pause = NULL;
+	const char *payload_size = NULL;
 	int n = 1; // number of loops. default 1 (if no second argument is specified)
+	int p = 0; // pause in ms
+	int ps = 1; // payload size
 
-	if (argc > 2) {
+	// I need at least one argument send_data
+	if (argc < 2) {
 		shell_error(sh, "Wrong number of arguments.");
 		shell_help(sh);
 		return SHELL_CMD_HELP_PRINTED;
 	}
 
-	if (argc == 2) {
+	// if I have more than one, I want to adjust packet count, wait time and payload size
+	if (argc > 1) {
 		count = argv[1];
 		char *endptr;
 		// Convert value in *number into integer
 		n = (int)strtol(count, &endptr, 10);
+		if (*endptr != '\0') {
+			shell_error(sh, "Argument must be numeric.");
+			return -EINVAL;
+		}
+
+		pause = argv[2];
+		// Convert value in *number into integer
+		p = (int)strtol(pause, &endptr, 10);
+		if (*endptr != '\0') {
+			shell_error(sh, "Argument must be numeric.");
+			return -EINVAL;
+		}
+
+		payload_size = argv[3];
+		// Convert value in *number into integer
+		ps = (int)strtol(pause, &endptr, 10);
 		if (*endptr != '\0') {
 			shell_error(sh, "Argument must be numeric.");
 			return -EINVAL;
@@ -622,22 +604,31 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 	}
 
 	// if n is > 0 -> packets can be sent
-	if (n > 0 && default_conn) {
+	if (default_conn) {
 		for(int i=0; i<n; i++) {
-			const int err = send_notification(default_conn, &notification_srv.attrs[2]);
+			const int err = send_notification(default_conn, &notification_srv.attrs[2], ps);
 			if(err) {
 				shell_error(sh, "Failed to send data. Reason: err=%d", err);
 			}
+			/*
+			uint32_t delta = t_end - t_start;
+			shell_print(sh, "Start: %u, End: %u", t_start, t_end);
+			shell_print(sh, "Result Locally: %u",  delta);
+			shell_print(sh, "Result Cumulated: %u",  sum_delta += delta);
+			shell_print(sh, "Result radio_is_done(): %u", delta_encryption_time);
+			shell_print(sh, "Enc Count: %u", enc_count);
+			*/
+			shell_print(sh, "Result: %u", t_end);
+			shell_print(sh, "Result Cumulated: %u",  sum_delta += t_end);
+
+			// send_notification fires faster than the packets are transmitted, so
+			// including a waiting time "corrects" the longer sending & encryption of the packet
+			k_msleep(p);
 		}
 	} else {
 		shell_print(sh, "Not connected");
 	}
 	return 0;
-}
-
-static void cmd_get_delta_encryption_time(const struct shell *sh, size_t argc, char *argv[]) {
-	shell_print(sh, "Start: %u, End: %u", t_start, t_end);
-	shell_print(sh, "Result: %u", delta_encryption_time);
 }
 
 static int cmd_service_and_characteristic_discovery(const struct shell *sh, size_t argc, char *argv[]) {
@@ -651,12 +642,10 @@ static int cmd_service_and_characteristic_discovery(const struct shell *sh, size
 static int cmd_subscribe(const struct shell *sh, size_t argc, char *argv[])
 {
 	int err = bt_gatt_subscribe(default_conn, &subscribe_params);
-	printk("subscribe err=%d value_handle=0x%04x ccc_handle=0x%04x\n",
-	   err, subscribe_params.value_handle, subscribe_params.ccc_handle);
 	if (err) {
-		shell_error(sh,"Subscribe failed (err %d)\n", err);
+		shell_error(sh,"Subscribe failed");
 	} else {
-		shell_print(sh,"Subscribed\n");
+		shell_print(sh,"Subscribing...\n");
 	}
 	return 0;
 }
@@ -758,10 +747,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD_ARG(ifa3, NULL, "", cmd_ifa_stage3, 1, 0),
 	SHELL_CMD_ARG(ifa4, NULL, "", cmd_ifa_stage4, 3, 0),
 	SHELL_CMD_ARG(ifa, NULL, "ifa addr addr_type n \n addr is target address formatted as "HELP_ADDR_LE" \n n is number of bondings\n", cmd_ifa, 4, 0),
-	SHELL_CMD(send_data, NULL, HELP_NONE, cmd_send_data),
-	SHELL_CMD_ARG(benchmark, NULL, "<value: start, stop>", cmd_benchmarking, 2, 0),
+	SHELL_CMD_ARG(send_data, NULL, HELP_NONE, cmd_send_data, 2, 3),
+	SHELL_CMD_ARG(benchmark, NULL, "<value: on, off>", cmd_benchmark, 2, 0),
 	SHELL_CMD(discover, NULL, "", cmd_service_and_characteristic_discovery),
 	SHELL_CMD(subscribe, NULL, "", cmd_subscribe),
-	SHELL_CMD(delta, NULL, "", cmd_get_delta_encryption_time));
+	SHELL_CMD(delta, NULL, "", cmd_get_delta_encryption_time),
+	SHELL_CMD(reset_delta, NULL, "", cmd_reset_sum_delta)
+	);
 
 SHELL_CMD_REGISTER(bleframework, &cmds, "Bluetooth shell commands", cmd_default_handler);

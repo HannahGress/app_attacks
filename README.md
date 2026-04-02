@@ -125,3 +125,21 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
 13. [Information only] In case your built project does not contain all changes you made, go to `Tools` $\rightarrow$ `CMake` $\rightarrow$ `Reset Cache and Reload Project`. Then build again.
 14. To flash the built project to your DK or dongle, you can use [`west flash`](https://docs.zephyrproject.org/latest/develop/west/build-flash-debug.html#flashing-west-flash) or Nordic Semiconductor's [Programmer App](https://www.nordicsemi.com/Products/Development-tools/nRF-Programmer). The built .hex file is located under `app_attacks\cmake-build-debug\zephyr\zephyr.hex`
 15. If you want to add debugging, follow [these steps](https://docs.zephyrproject.org/latest/develop/tools/clion.html#configure-zephyr-parameters-for-debug)
+
+
+## Benchmarking
+1. set up a connection between the two devices
+
+| Device A                                                                | Device B                                                                  |
+|-------------------------------------------------------------------------|---------------------------------------------------------------------------|
+| `bleframework init`                                                     | `bleframework init`                                                       |
+|                                                                         | `bleframework advertise start`                                            |
+| `bleframework scan start`                                               |                                                                           |
+| // when device A is found <br> `bleframework scan stop`                 |                                                                           |
+| `bleframework scan stop`                                                |                                                                           |
+| `bleframework pair <BDA (public \| private)>`                           |                                                                           |
+| // discover the characterisitc to subscribe <br>`bleframework discover` |                                                                           |
+| // subscribe to it <br> `bleframework subscribe`                        |                                                                           |
+|                                                                         | // enable benchmarking <br> `bleframework benchmark on`                   |
+|                                                                         | `bleframework send_data <n>`                                              |
+|                                                                         | // display encryption time of all n packets sent <br>`bleframework delta` |

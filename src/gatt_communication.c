@@ -1,9 +1,11 @@
 #include "zephyr/bluetooth/gatt.h"
 #include "zephyr/random/random.h"
+#include <zephyr/shell/shell.h>
 
-#define PAYLOAD_LEN 20
-static uint8_t payload[PAYLOAD_LEN];
+#include "main.h"
+
 static bool notify_enabled;
+#define MAX_PAYLOAD_SIZE 244
 
 /* own UUIDs */
 static struct bt_uuid_128 svc_uuid =
@@ -30,7 +32,6 @@ static void ccc_notification_config_changed(const struct bt_gatt_attr *attr, uin
 {
     notify_enabled = (value == BT_GATT_CCC_NOTIFY);
 
-    printk("Notifications %s\n", notify_enabled ? "enabled" : "disabled");
 }
 
 /* service + characteristic */
@@ -40,23 +41,30 @@ BT_GATT_SERVICE_DEFINE(notification_srv,
     BT_GATT_CHARACTERISTIC(&chrc_uuid.uuid,
         BT_GATT_CHRC_NOTIFY,
         BT_GATT_PERM_NONE,
-        NULL, NULL, payload),
+        NULL, NULL, NULL),
 
     BT_GATT_CCC(ccc_notification_config_changed,
         BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 );
 
-int send_notification(struct bt_conn *conn, const struct bt_gatt_attr *attr)
+int send_notification(struct bt_conn *conn, const struct bt_gatt_attr *attr, int payload_size)
 {
     // if client has not subscribed yet
     if (!notify_enabled) {
         return -EINVAL;
     }
 
-    /* fill with random bytes */
-    sys_rand_get(payload, PAYLOAD_LEN);
+    if (payload_size <= 0 || payload_size > MAX_PAYLOAD_SIZE) {
+        return -EINVAL;
+    }
 
-    return bt_gatt_notify(conn, attr, payload, PAYLOAD_LEN);
+    // create payload array
+    uint8_t payload[payload_size];
+
+    // fill with random bytes
+    sys_rand_get(payload, payload_size);
+
+    return bt_gatt_notify(conn, attr, payload, payload_size);
 }
 
 /*
@@ -68,26 +76,29 @@ static uint8_t notification_cb(struct bt_conn *conn,
                           const void *data, uint16_t length)
 {
     if (!data) {
-        printk("Unsubscribed\n");
+        shell_print(shell, "Unsubscribed\n");
         params->value_handle = 0;
         return BT_GATT_ITER_STOP;
     }
 
-    printk("Notification received (%u bytes)\n", length);
+    shell_print(shell, "Notification received (%u bytes)\n", length);
     return BT_GATT_ITER_CONTINUE;
 }
 
 static void subscribe_cb(struct bt_conn *conn, uint8_t err,
                          struct bt_gatt_subscribe_params *params)
 {
-    printk("subscribe_cb err=%u\n", err);
+    if(err==1) {
+        shell_error(shell, "Subscribe failed");
+    } else {
+        shell_print(shell, "Subscribed\n");
+    }
 }
 
 struct bt_gatt_subscribe_params subscribe_params = {
     .notify = notification_cb,
     .subscribe = subscribe_cb,
     .value = BT_GATT_CCC_NOTIFY,
-    //.ccc_handle = BT_GATT_AUTO_DISCOVER_CCC_HANDLE,
 };
 
 static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
@@ -95,7 +106,7 @@ static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
                  struct bt_gatt_discover_params *params)
 {
     if (!attr) {
-        printk("Discovery done\n");
+        shell_print(shell, "Discovery done\n");
         return BT_GATT_ITER_STOP;
     }
 
@@ -118,8 +129,9 @@ static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
         const struct bt_gatt_chrc *characteristic = attr->user_data;
         value_handle = characteristic->value_handle;
         subscribe_params.value_handle = value_handle;
-        printk("decl_handle=0x%04x value_handle=0x%04x\n",
-           attr->handle, characteristic->value_handle);
+        shell_print(shell, "Value handle: 0x%04x\n", characteristic->value_handle);
+        // printk("decl_handle=0x%04x value_handle=0x%04x\n",
+           //attr->handle, characteristic->value_handle);
     }
 
     // change params for ccc discovery
@@ -129,8 +141,7 @@ static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
     if (params->type == BT_GATT_DISCOVER_DESCRIPTOR) {
         if (!bt_uuid_cmp(attr->uuid, BT_UUID_GATT_CCC)) {
             subscribe_params.ccc_handle = attr->handle;
-            printk("decl_handle=0x%04x",
-            attr->handle);
+            shell_print(shell, "CCC handle: 0x%04x\n", attr->handle);
         }
     }
 
