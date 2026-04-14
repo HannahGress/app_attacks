@@ -1,12 +1,10 @@
-//#include <controller/ll_sw/nordic/hal/nrf5/radio/radio.h>
 #include <controller/ll_sw/nordic/hal/nrf5/radio/radio_nrf5_ppi.h>
 #include <zephyr/shell/shell.h>
-//#include "main.h"
 
 uint32_t sum_delta;
 
 static void cpu_tick_count_on() {
-    hal_radio_ccm_endcrypt_time_capture_ppi_config();
+    hal_radio_ccm_encrypt_time_capture_ppi_config();
     hal_radio_nrf_ppi_channels_enable(BIT(HAL_CRYPT_END_TIME_CAPTURE_PPI) | BIT(HAL_CRYPT_START_TIME_CAPTURE_PPI));
 }
 

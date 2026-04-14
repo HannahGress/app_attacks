@@ -1,8 +1,9 @@
 #include "zephyr/bluetooth/gatt.h"
 #include "zephyr/random/random.h"
 #include <zephyr/shell/shell.h>
-
+#include <controller/ll_sw/nordic/hal/nrf5/radio/radio.h>
 #include "main.h"
+#include "benchmarking.h"
 
 static bool notify_enabled;
 #define MAX_PAYLOAD_SIZE 244
@@ -82,6 +83,8 @@ static uint8_t notification_cb(struct bt_conn *conn,
     }
 
     shell_print(shell, "Notification received (%u bytes)\n", length);
+    shell_print(shell, "Result: %u", t_end);
+    shell_print(shell, "Result Cumulated: %u",  sum_delta += t_end);
     return BT_GATT_ITER_CONTINUE;
 }
 

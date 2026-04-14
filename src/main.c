@@ -197,6 +197,33 @@ static int cmd_scan(const struct shell *sh, size_t argc, char *argv[])
 	return SHELL_CMD_HELP_PRINTED;
 }
 
+
+
+static void mtu_exchange_cb(struct bt_conn *conn, uint8_t err,
+				struct bt_gatt_exchange_params *params)
+{
+	printk("%s: MTU exchange %s (%u)\n", __func__,
+		   err == 0U ? "successful" : "failed",
+		   bt_gatt_get_mtu(conn));
+}
+
+static struct bt_gatt_exchange_params mtu_exchange_params = {
+	.func = mtu_exchange_cb
+};
+
+static int mtu_exchange(struct bt_conn *conn)
+{
+	printk("%s: Current MTU = %u\n", __func__, bt_gatt_get_mtu(conn));
+
+	printk("%s: Exchange MTU...\n", __func__);
+	int err = bt_gatt_exchange_mtu(conn, &mtu_exchange_params);
+	if (err) {
+		printk("%s: MTU exchange failed (err %d)", __func__, err);
+	}
+
+	return err;
+}
+
 static int cmd_connect(const struct shell *sh, size_t argc, char *argv[])
 {
 	int err;
@@ -301,6 +328,14 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	default_conn = bt_conn_ref(conn);
 	is_connected = true;
 	k_sem_give(&conn_sem); 	// Signal that connection is complete
+
+	// send ATT MTU request/response depending on role (Central/Peripheral)
+	if(conn_info.role == BT_CONN_ROLE_CENTRAL) {
+		(void)mtu_exchange(conn);
+	} else if (conn_info.role == BT_CONN_ROLE_PERIPHERAL) {
+		printk("Connected, current ATT MTU: %u\n", bt_gatt_get_mtu(conn));
+	}
+
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -561,6 +596,7 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 	int n = 1; // number of loops. default 1 (if no second argument is specified)
 	int p = 0; // pause in ms
 	int ps = 1; // payload size
+	char *endptr;
 
 	// I need at least one argument send_data
 	if (argc < 2) {
@@ -570,16 +606,18 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 	}
 
 	// if I have more than one, I want to adjust packet count, wait time and payload size
+
 	if (argc > 1) {
 		count = argv[1];
-		char *endptr;
 		// Convert value in *number into integer
 		n = (int)strtol(count, &endptr, 10);
 		if (*endptr != '\0') {
 			shell_error(sh, "Argument must be numeric.");
 			return -EINVAL;
 		}
+	}
 
+	if (argc > 2) {
 		pause = argv[2];
 		// Convert value in *number into integer
 		p = (int)strtol(pause, &endptr, 10);
@@ -587,10 +625,12 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 			shell_error(sh, "Argument must be numeric.");
 			return -EINVAL;
 		}
+	}
 
+	if (argc > 3) {
 		payload_size = argv[3];
 		// Convert value in *number into integer
-		ps = (int)strtol(pause, &endptr, 10);
+		ps = (int)strtol(payload_size, &endptr, 10);
 		if (*endptr != '\0') {
 			shell_error(sh, "Argument must be numeric.");
 			return -EINVAL;
