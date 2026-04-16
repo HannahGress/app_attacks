@@ -136,10 +136,9 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
 |                                                                         | `bleframework advertise start`                                            |
 | `bleframework scan start`                                               |                                                                           |
 | // when device A is found <br> `bleframework scan stop`                 |                                                                           |
-| `bleframework scan stop`                                                |                                                                           |
 | `bleframework pair <BDA (public \| private)>`                           |                                                                           |
 | // discover the characterisitc to subscribe <br>`bleframework discover` |                                                                           |
 | // subscribe to it <br> `bleframework subscribe`                        |                                                                           |
 |                                                                         | // enable benchmarking <br> `bleframework benchmark on`                   |
-|                                                                         | `bleframework send_data <n>`                                              |
+|                                                                         | `bleframework send_data <n> <pause> <payload size>`                                              |
 |                                                                         | // display encryption time of all n packets sent <br>`bleframework delta` |
