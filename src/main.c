@@ -658,8 +658,10 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 			shell_print(sh, "Result radio_is_done(): %u", delta_encryption_time);
 			shell_print(sh, "Enc Count: %u", enc_count);
 			*/
-			shell_print(sh, "Result: %u", t_end);
-			shell_print(sh, "Result Cumulated: %u",  sum_delta += t_end);
+			shell_print(sh, "Result t_end_KSGEN: %u", t_end_KSGEN);
+			shell_print(sh, "Result t_start_ENDCRYPT: %u", t_start_ENDCRYPT);
+			shell_print(sh, "Result t_end_ENDCRYPT: %u", t_end_ENDCRYPT);
+			//shell_print(sh, "Result Cumulated: %u",  sum_delta += t_end);
 
 			// send_notification fires faster than the packets are transmitted, so
 			// including a waiting time "corrects" the longer sending & encryption of the packet

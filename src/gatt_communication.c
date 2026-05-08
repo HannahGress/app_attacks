@@ -83,8 +83,11 @@ static uint8_t notification_cb(struct bt_conn *conn,
     }
 
     shell_print(shell, "Notification received (%u bytes)\n", length);
-    shell_print(shell, "Result: %u", t_end);
-    shell_print(shell, "Result Cumulated: %u",  sum_delta += t_end);
+    //shell_print(shell, "Result: %u", t_end);
+    //shell_print(shell, "Result Cumulated: %u",  sum_delta += t_end);
+    shell_print(shell, "Result t_end_KSGEN: %u", t_end_KSGEN);
+    shell_print(shell, "Result t_start_ENDCRYPT: %u", t_start_ENDCRYPT);
+    shell_print(shell, "Result t_end_ENDCRYPT: %u", t_end_ENDCRYPT);
     return BT_GATT_ITER_CONTINUE;
 }
 
