@@ -2,6 +2,8 @@
 #include "zephyr/random/random.h"
 #include <zephyr/shell/shell.h>
 #include <controller/ll_sw/nordic/hal/nrf5/radio/radio.h>
+#include <controller/ll_sw/nordic/hal/nrf5/radio/radio_nrf5_ppi.h>
+
 #include "main.h"
 #include "benchmarking.h"
 
@@ -83,11 +85,11 @@ static uint8_t notification_cb(struct bt_conn *conn,
     }
 
     shell_print(shell, "Notification received (%u bytes)\n", length);
-    //shell_print(shell, "Result: %u", t_end);
-    //shell_print(shell, "Result Cumulated: %u",  sum_delta += t_end);
-    shell_print(shell, "Result t_end_KSGEN: %u", t_end_KSGEN);
-    shell_print(shell, "Result t_start_ENDCRYPT: %u", t_start_ENDCRYPT);
+    shell_print(shell, "Result t_start_ENDCRYPT: %u", t_start_DECRYPT);
     shell_print(shell, "Result t_end_ENDCRYPT: %u", t_end_ENDCRYPT);
+    shell_print(shell, "Result Difference: %u", t_end_ENDCRYPT - t_start_DECRYPT);
+
+
     return BT_GATT_ITER_CONTINUE;
 }
 
@@ -136,8 +138,6 @@ static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
         value_handle = characteristic->value_handle;
         subscribe_params.value_handle = value_handle;
         shell_print(shell, "Value handle: 0x%04x\n", characteristic->value_handle);
-        // printk("decl_handle=0x%04x value_handle=0x%04x\n",
-           //attr->handle, characteristic->value_handle);
     }
 
     // change params for ccc discovery

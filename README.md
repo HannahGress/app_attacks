@@ -82,7 +82,7 @@ This attack is only applicable to Central devices.
 
 ## Installation or Modification
 If you only want to use the framework, you can download the prebuild .hex files for the nRF53840 DK and dongle as well as the nRF54L15 DK.
-If you want to make modifications tot he project, follow the steps below. I used CLion as an IDE. The instructions are written for Windows, but can be adapted to Linux and Mac.
+If you want to make modifications to the project, follow the steps below. I used CLion as an IDE. The instructions are written for Windows, but can be adapted to Linux and Mac.
 The project consist of two repositories, a fork of the [Zephyr project](https://github.com/HannahGress/zephyr_attacks), and this repository. When setting up the project, both will be combined.  
 
 1. In your IDE, import the project as "Project from Version Control"
@@ -95,9 +95,8 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
    3. Install `west` with `pip install west`
    4. Initialize `west` by running `west init -l app_attacks`
    5. Run `west update`
-   6. Open the cmd as admin. Create a symlink for `zephyr\_attacks` (Windows: `mklink /D zephyr zephyr_attacks`)
-   7. Return to cmd as normal user. Export a Zephyr `CMake`package. This allows `CMake` to automatically load boilerplate code required for building Zephyr applications. Command: `west zephyr-export`
-   8. Install Python dependencies using west packages with `west packages pip --install`
+   6. Export a Zephyr `CMake`package. This allows `CMake` to automatically load boilerplate code required for building Zephyr applications. Command: `west zephyr-export`
+   7. Install Python dependencies using west packages with `west packages pip --install`
 4. Install Zephyr’s `scripts\requirements.txt` with `pip install -r zephyr_attacks\scripts\requirements.txt`
 5. Install the Zephyr SDK by navigating into the `zephyr_attacks` folder and calling `west sdk install` ([source](https://docs.zephyrproject.org/latest/develop/getting_started/index.html#install-the-zephyr-sdk))
 6. [Information only] To update the Zephyr project source code, run the following commands while being in the `zephyr_attacks` folder ([source](https://zephyr-docs.listenai.com/guides/beyond-GSG.html#keeping-zephyr-updated)):
@@ -139,6 +138,6 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
 | `bleframework pair <BDA (public \| private)>`                           |                                                                           |
 | // discover the characterisitc to subscribe <br>`bleframework discover` |                                                                           |
 | // subscribe to it <br> `bleframework subscribe`                        |                                                                           |
-|                                                                         | // enable benchmarking <br> `bleframework benchmark on`                   |
-|                                                                         | `bleframework send_data <n> <pause> <payload size>`                                              |
+| // optional: enable benchmarking <br> `bleframework benchmark on`       | // enable benchmarking <br> `bleframework benchmark on`                   |
+|                                                                         | `bleframework send_data <n> <pause> <payload size>`                       |
 |                                                                         | // display encryption time of all n packets sent <br>`bleframework delta` |

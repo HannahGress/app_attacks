@@ -34,7 +34,6 @@ struct bt_conn *default_conn;
 uint8_t selected_id = BT_ID_DEFAULT;
 const struct shell *shell;
 static bool is_connected = false;
-static bool is_benchmarking = false;
 
 static const char *security_err_str(enum bt_security_err err)
 {
@@ -336,6 +335,8 @@ static void connected(struct bt_conn *conn, uint8_t err)
 		printk("Connected, current ATT MTU: %u\n", bt_gatt_get_mtu(conn));
 	}
 
+	advertising_stop();
+
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -586,9 +587,6 @@ static int cmd_init(const struct shell *sh)
 
 static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 {
-	if(is_benchmarking) {
-		// delta_encryption_time = 0;
-	}
 
 	const char *count = NULL;
 	const char *pause = NULL;
@@ -646,26 +644,20 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 	// if n is > 0 -> packets can be sent
 	if (default_conn) {
 		for(int i=0; i<n; i++) {
+
 			const int err = send_notification(default_conn, &notification_srv.attrs[2], ps);
 			if(err) {
 				shell_error(sh, "Failed to send data. Reason: err=%d", err);
 			}
-			/*
-			uint32_t delta = t_end - t_start;
-			shell_print(sh, "Start: %u, End: %u", t_start, t_end);
-			shell_print(sh, "Result Locally: %u",  delta);
-			shell_print(sh, "Result Cumulated: %u",  sum_delta += delta);
-			shell_print(sh, "Result radio_is_done(): %u", delta_encryption_time);
-			shell_print(sh, "Enc Count: %u", enc_count);
-			*/
-			shell_print(sh, "Result t_end_KSGEN: %u", t_end_KSGEN);
-			shell_print(sh, "Result t_start_ENDCRYPT: %u", t_start_ENDCRYPT);
+
+			shell_print(sh, "Result t_start_ENDCRYPT: %u", t_start_ENCRYPT);
 			shell_print(sh, "Result t_end_ENDCRYPT: %u", t_end_ENDCRYPT);
-			//shell_print(sh, "Result Cumulated: %u",  sum_delta += t_end);
+			shell_print(sh, "Difference: %u", t_end_ENDCRYPT -  t_start_ENCRYPT);
 
 			// send_notification fires faster than the packets are transmitted, so
 			// including a waiting time "corrects" the longer sending & encryption of the packet
 			k_msleep(p);
+
 		}
 	} else {
 		shell_print(sh, "Not connected");
@@ -793,8 +785,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD_ARG(benchmark, NULL, "<value: on, off>", cmd_benchmark, 2, 0),
 	SHELL_CMD(discover, NULL, "", cmd_service_and_characteristic_discovery),
 	SHELL_CMD(subscribe, NULL, "", cmd_subscribe),
-	SHELL_CMD(delta, NULL, "", cmd_get_delta_encryption_time),
-	SHELL_CMD(reset_delta, NULL, "", cmd_reset_sum_delta)
+	SHELL_CMD(time_results, NULL, "", cmd_get_time_results),
 	);
 
 SHELL_CMD_REGISTER(bleframework, &cmds, "Bluetooth shell commands", cmd_default_handler);
