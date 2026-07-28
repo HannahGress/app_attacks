@@ -12,8 +12,6 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include <controller/ll_sw/nordic/hal/nrf5/radio/radio.h>
-#include <controller/ll_sw/nordic/hal/nrf5/radio/radio_nrf5_ppi.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
@@ -28,7 +26,8 @@
 #include "ifa.h"
 #include "gatt_communication.h"
 #include "benchmarking.h"
-#include "zephyr/random/random.h"
+#include "nRF52_54_ppi_dppi.h"
+
 
 struct bt_conn *default_conn;
 uint8_t selected_id = BT_ID_DEFAULT;
@@ -528,12 +527,14 @@ static struct bt_conn_auth_info_cb auth_info_cb = {
 
 // use NRF_TIMER3 to capture event when BLE encryption is finished
 static void init_timer() {
+	#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 	NRF_TIMER3->MODE = TIMER_MODE_MODE_Timer;
 	NRF_TIMER3->BITMODE = TIMER_BITMODE_BITMODE_32Bit;
 	NRF_TIMER3->PRESCALER = 4;   // 1 MHz → 1 tick = 1 µs
 
 	NRF_TIMER3->TASKS_CLEAR = 1;
 	NRF_TIMER3->TASKS_START = 1;
+	#endif
 }
 
 static int cmd_init(const struct shell *sh)
@@ -650,9 +651,11 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 				shell_error(sh, "Failed to send data. Reason: err=%d", err);
 			}
 
+			#if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
 			shell_print(sh, "Result t_start_ENDCRYPT: %u", t_start_ENCRYPT);
 			shell_print(sh, "Result t_end_ENDCRYPT: %u", t_end_ENDCRYPT);
 			shell_print(sh, "Difference: %u", t_end_ENDCRYPT -  t_start_ENCRYPT);
+			#endif
 
 			// send_notification fires faster than the packets are transmitted, so
 			// including a waiting time "corrects" the longer sending & encryption of the packet

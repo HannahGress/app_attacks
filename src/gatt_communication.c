@@ -1,11 +1,12 @@
 #include "zephyr/bluetooth/gatt.h"
 #include "zephyr/random/random.h"
 #include <zephyr/shell/shell.h>
-#include <controller/ll_sw/nordic/hal/nrf5/radio/radio.h>
-#include <controller/ll_sw/nordic/hal/nrf5/radio/radio_nrf5_ppi.h>
-
 #include "main.h"
-#include "benchmarking.h"
+
+#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+#include <controller/ll_sw/nordic/hal/nrf5/radio/radio.h>
+#endif
+
 
 static bool notify_enabled;
 #define MAX_PAYLOAD_SIZE 244
@@ -83,11 +84,12 @@ static uint8_t notification_cb(struct bt_conn *conn,
         params->value_handle = 0;
         return BT_GATT_ITER_STOP;
     }
-
+    #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
     shell_print(shell, "Notification received (%u bytes)\n", length);
     shell_print(shell, "Result t_start_ENDCRYPT: %u", t_start_DECRYPT);
     shell_print(shell, "Result t_end_ENDCRYPT: %u", t_end_ENDCRYPT);
     shell_print(shell, "Result Difference: %u", t_end_ENDCRYPT - t_start_DECRYPT);
+    #endif
 
 
     return BT_GATT_ITER_CONTINUE;
