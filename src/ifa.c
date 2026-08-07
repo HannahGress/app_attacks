@@ -1,5 +1,5 @@
-#include "ifa.h"
-#include "main.h"
+#include "../include/ifa.h"
+#include "../include/main.h"
 
 #include <host/keys.h>
 

@@ -12,6 +12,9 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <common/bt_str.h>
+#include <host/conn_internal.h>
+#include <host/keys.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
@@ -23,16 +26,28 @@
 #include <zephyr/settings/settings.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
-#include "ifa.h"
-#include "gatt_communication.h"
-#include "benchmarking.h"
-#include "nRF52_54_ppi_dppi.h"
+#include <ifa.h>
+#include <gatt_communication.h>
+#include <benchmarking.h>
+#if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+#include "../include/nRF52_54_ppi_dppi.h"
+#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/ipc/ipc_service.h>
+#include <ipc_service.h>
+#include <shared_variables.h>
+#endif
+#if defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+#include <nrf54l15_global.h>
+#endif
 
 
 struct bt_conn *default_conn;
 uint8_t selected_id = BT_ID_DEFAULT;
 const struct shell *shell;
 static bool is_connected = false;
+#define NAME_LEN 30
 
 static const char *security_err_str(enum bt_security_err err)
 {
@@ -124,31 +139,62 @@ static int cmd_advertise(const struct shell *sh, size_t argc, char *argv[])
 	}
 }
 
+static bool data_cb(struct bt_data *data, void *user_data)
+{
+	char *name = user_data;
+	uint8_t len;
+
+	switch (data->type) {
+		case BT_DATA_NAME_SHORTENED:
+		case BT_DATA_NAME_COMPLETE:
+			len = MIN(data->data_len, NAME_LEN - 1);
+		memcpy(name, data->data, len);
+		name[len] = '\0';
+		return false;
+		default:
+			return true;
+	}
+}
+
 // as soon as the callback function is called it listens to adv events until stop_advertising() is called
 static void scan_started(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 			 struct net_buf_simple *ad)
 {
 	char dev[BT_ADDR_LE_STR_LEN];
-	//int err;
+	char name[NAME_LEN];
 
 	/* We're only interested in connectable events */
 	if (type != BT_GAP_ADV_TYPE_ADV_IND &&
-		type != BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
+		type != BT_GAP_ADV_TYPE_ADV_DIRECT_IND &&
+		type != BT_GAP_ADV_TYPE_SCAN_RSP) {
 		return;
-	}
+		}
 
 	/* connect only to devices in close proximity */
 	if (rssi > -50) {
 		bt_addr_le_to_str(addr, dev, sizeof(dev));
+		(void)memset(name, 0, sizeof(name));
 
-		shell_print(shell, "[DEVICE]: %s, AD evt type %u, AD data len %u, RSSI %i",
-		   dev, type, ad->len, rssi);
+		uint16_t ad_len = ad->len;
+
+		bt_data_parse(ad, data_cb, name);
+
+		shell_print(shell,
+		"[DEVICE]: %s, Name: %s, AD evt type %u, AD data len %u, RSSI %i",
+		dev, name[0] ? name : "<none>", type, ad_len, rssi);
 	}
 }
 
 static int scan_start(void)
 {
-	int err = bt_le_scan_start(BT_LE_SCAN_ACTIVE, scan_started);
+	struct bt_le_scan_param param = {
+		.type       = BT_LE_SCAN_TYPE_ACTIVE,
+		.options    = BT_LE_SCAN_OPT_FILTER_DUPLICATE,
+		.interval   = BT_GAP_SCAN_FAST_INTERVAL,
+		.window     = BT_GAP_SCAN_FAST_WINDOW,
+		.timeout    = 0, };
+
+	int err = bt_le_scan_start(&param, scan_started);
 	if (err) {
 		shell_error(shell,"Scanning failed to start, reason: %d (%s)", err, bt_hci_err_to_str(err));
 		return err;
@@ -403,14 +449,45 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err err)
 			security_err_str(err));
 }
 
+void show_bt_keys_info(struct bt_keys *keys, void *data)
+{
+	uint8_t ltk[16];
+
+	if (keys->keys & BT_KEYS_LTK_P256) {
+		sys_memcpy_swap(ltk, keys->ltk.val, keys->enc_size);
+		shell_print(shell, "SC LTK: 0x%s", bt_hex(ltk, keys->enc_size));
+	}
+
+#if !defined(CONFIG_BT_SMP_SC_PAIR_ONLY)
+	if (keys->keys & BT_KEYS_PERIPH_LTK) {
+		sys_memcpy_swap(ltk, keys->periph_ltk.val, keys->enc_size);
+		shell_print(shell, "Legacy LTK: 0x%s (peripheral)", bt_hex(ltk, keys->enc_size));
+	}
+#endif /* !CONFIG_BT_SMP_SC_PAIR_ONLY */
+
+	if (keys->keys & BT_KEYS_LTK) {
+		sys_memcpy_swap(ltk, keys->ltk.val, keys->enc_size);
+		shell_print(shell, "Legacy LTK: 0x%s (central)", bt_hex(ltk, keys->enc_size));
+	}
+}
+
 static void pairing_complete(struct bt_conn *conn, bool bonded)
 {
 	char addr[BT_ADDR_LE_STR_LEN];
+	struct bt_conn_info conn_info;
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	shell_print(shell, "Pairing complete: %s with %s", bonded ? "Bonded" : "Paired",
 			addr);
+
+	int err = bt_conn_get_info(conn, &conn_info);
+	if (err) {
+		shell_error(shell, "Failed to get connection info, reason: %d (%s).\n", err, bt_hci_err_to_str(err));
+	}
+
+	// print it so you can verify if it's an SC/Legacy or 7/16 Bytes key
+	show_bt_keys_info(conn->le.keys, NULL);
 }
 
 static void bond_info(const struct bt_bond_info *info, void *user_data)
@@ -525,17 +602,101 @@ static struct bt_conn_auth_info_cb auth_info_cb = {
 	.bond_deleted = bond_deleted,
 };
 
+
 // use NRF_TIMER3 to capture event when BLE encryption is finished
 static void init_timer() {
 	#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+	NRF_TIMER3->TASKS_STOP = 1;
 	NRF_TIMER3->MODE = TIMER_MODE_MODE_Timer;
 	NRF_TIMER3->BITMODE = TIMER_BITMODE_BITMODE_32Bit;
 	NRF_TIMER3->PRESCALER = 4;   // 1 MHz → 1 tick = 1 µs
 
 	NRF_TIMER3->TASKS_CLEAR = 1;
 	NRF_TIMER3->TASKS_START = 1;
+
+	#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP) || defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUNET)
+	NRF_TIMER1->TASKS_STOP = 1;
+	NRF_TIMER1->MODE = TIMER_MODE_MODE_Timer;
+	NRF_TIMER1->BITMODE = TIMER_BITMODE_BITMODE_32Bit;
+	NRF_TIMER1->PRESCALER = 4;   // 1 MHz → 1 tick = 1 µs
+
+	NRF_TIMER1->TASKS_CLEAR = 1;
+	NRF_TIMER1->TASKS_START = 1;
+
+	#elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+
+	NRF_TIMER10->TASKS_STOP = 1;
+
+	NRF_TIMER10->MODE =
+		TIMER_MODE_MODE_Timer;
+
+	NRF_TIMER10->BITMODE =
+		TIMER_BITMODE_BITMODE_32Bit;
+
+	NRF_TIMER10->PRESCALER = 4;  // 16 MHz / 2^4 = 1 MHz
+
+	NRF_TIMER10->TASKS_CLEAR = 1;
+	NRF_TIMER10->TASKS_START = 1;
 	#endif
 }
+
+/**
+* Define IPC for the two cores
+*/
+
+#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+static struct ipc_ept benchmark_ept;
+
+static K_SEM_DEFINE(benchmark_bound_sem, 0, 1);
+
+static void benchmark_ept_bound(void *priv)
+{
+	k_sem_give(&benchmark_bound_sem);
+}
+
+static struct ipc_ept_cfg benchmark_ept_cfg = {
+	.name = BENCHMARK_ENDPOINT_NAME,
+	.cb = {
+		.bound = benchmark_ept_bound,
+	},
+};
+
+int benchmark_ipc_init(void)
+{
+	const struct device *ipc_instance =
+		DEVICE_DT_GET(DT_NODELABEL(ipc0));
+
+	int err;
+
+	err = ipc_service_open_instance(ipc_instance);
+
+	if (err < 0 && err != -EALREADY) {
+		return err;
+	}
+
+	err = ipc_service_register_endpoint(
+		ipc_instance,
+		&benchmark_ept,
+		&benchmark_ept_cfg
+	);
+
+	if (err < 0) {
+		return err;
+	}
+
+	/*
+	 * Wait until CPUNET has registered the same endpoint
+	 */
+	err = k_sem_take(&benchmark_bound_sem, K_SECONDS(2));
+
+	if (err) {
+		return -ETIMEDOUT;
+	}
+
+	return 0;
+}
+#endif
+
 
 static int cmd_init(const struct shell *sh)
 {
@@ -544,14 +705,22 @@ static int cmd_init(const struct shell *sh)
 
 	err = bt_enable(NULL);
 	if (err) {
-		printf("Bluetooth init failed, reason: %d (%s)\n", err, bt_hci_err_to_str(err));
+		printf("Bluetooth init failed, reason: %d (%s)\n", err, strerror(-err));
 		return -1;
 	}
 	printf("Bluetooth initialized\n");
 
+	#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+	err = benchmark_ipc_init();
+	if (err) {
+		printf("Benchmark IPC init failed: %d\n", err);
+		return err;
+	}
+	#endif
+
 	err = settings_load();
 	if(err < 0){
-		printf("Loading settings failed, reason: %d (%s)\n", err, bt_hci_err_to_str(err));
+		printf("Loading settings failed, reason: %d (%s)\n", err, strerror(-err));
 		printf("continuing anyways\n");
 	} else {
 		printf("Settings loaded\n");
@@ -561,14 +730,14 @@ static int cmd_init(const struct shell *sh)
 
 	err = bt_conn_auth_info_cb_register(&auth_info_cb);
 	if (err) {
-		printf("Failed to register authorization info callbacks, reason: %d (%s).\n", err, bt_hci_err_to_str(err));
+		printf("Failed to register authorization info callbacks, reason: %d (%s).\n", err, strerror(-err));
 		return -1;
 	}
 	printf("Bluetooth authentication info callbacks registered.\n");
 
 	err = bt_conn_auth_cb_register(&conn_auth_callbacks);
 	if (err) {
-		printf("Failed to register authorization callbacks, reason: %d ( %s)\n", err, bt_hci_err_to_str(err));
+		printf("Failed to register authorization callbacks, reason: %d ( %s)\n", err, strerror(-err));
 		return -1;
 	}
 
@@ -576,7 +745,7 @@ static int cmd_init(const struct shell *sh)
 
 	err = bt_conn_cb_register(&connection_callbacks);
 	if (err) {
-		printf("Failed to register connection callbacks, reason: %d (%s)\n", err, bt_hci_err_to_str(err));
+		printf("Failed to register connection callbacks, reason: %d (%s)\n", err, strerror(-err));
 		return -1;
 	}
 	printf("Bluetooth connection callbacks registered.\n");
@@ -646,15 +815,40 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 	if (default_conn) {
 		for(int i=0; i<n; i++) {
 
+			#if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+			uint32_t old_enc_count = enc_count;
+			#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+			uint32_t old_enc_count = BENCHMARK_SHARED_VARIABLES->enc_count;
+			#endif
+
 			const int err = send_notification(default_conn, &notification_srv.attrs[2], ps);
 			if(err) {
 				shell_error(sh, "Failed to send data. Reason: err=%d", err);
 			}
 
-			#if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+			k_sleep(K_MSEC(1));
+
+			#if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+
+			// we wait to be sure that radio has written the new values
+			while (enc_count == old_enc_count) {
+				k_sleep(K_USEC(100));
+			}
+
 			shell_print(sh, "Result t_start_ENDCRYPT: %u", t_start_ENCRYPT);
 			shell_print(sh, "Result t_end_ENDCRYPT: %u", t_end_ENDCRYPT);
-			shell_print(sh, "Difference: %u", t_end_ENDCRYPT -  t_start_ENCRYPT);
+			shell_print(sh, "Difference: %u", delta_ENCRYPT);
+			#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+
+			// we wait to be sure that CPUNET has written the new values
+			while (BENCHMARK_SHARED_VARIABLES->enc_count == old_enc_count) {
+				k_sleep(K_USEC(100));
+			}
+
+			__DMB();
+			shell_print(sh, "Result t_start_ENDCRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_start_ENCRYPT);
+			shell_print(sh, "Result t_end_ENDCRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_end_ENDCRYPT);
+			shell_print(sh, "Difference: %u", BENCHMARK_SHARED_VARIABLES->delta_ENCRYPT);
 			#endif
 
 			// send_notification fires faster than the packets are transmitted, so
@@ -766,7 +960,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD(security, NULL, "security level 2 for Nino attack", cmd_security),
 	SHELL_CMD_ARG(pair, NULL, NULL, cmd_pair, 3, 0),
 	SHELL_CMD(bonds, NULL, HELP_NONE, cmd_bonds),
-	SHELL_CMD_ARG(unpair, NULL, "[all] ["HELP_ADDR_LE"]", cmd_pairing_delete, 3, 0),
+	SHELL_CMD_ARG(unpair, NULL, "[all] ["HELP_ADDR_LE"]", cmd_pairing_delete, 2, 1),
 	SHELL_CMD_ARG(knob, NULL, "<true/false> (reduce LTK entropy)", cmd_knob, 2, 0),
 	SHELL_CMD_ARG(scda, NULL, "<true/false> (enable/disable Secure Connections Downgrade Attack)", cmd_scda, 2, 0),
 	SHELL_CMD_ARG(id_reset, NULL, "Enter an id which should be reset", cmd_reset, 2, 0),

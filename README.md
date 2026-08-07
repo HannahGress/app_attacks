@@ -37,7 +37,7 @@ bleframework scan start
 bleframework ifa1 <BDA (public|private)>
 // call ifa stage 2 n times (n max. 20)
 // n specifies with how many fake IDs (fake BDAs) should be paired to fill the device's bonding list
-bleframework ifa2 <BDA (public|private)>
+bleframework ifa2 <BDA (public|private)> <n>
 // ifa stage 3: resetting to initial ID (ID 0)
 bleframework ifa3
 // ifa stage 4: connect to device to see if the bonding information from ID 0 are still stored

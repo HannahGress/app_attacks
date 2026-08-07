@@ -1,0 +1,6 @@
+// we reserve the same memory region than we did for the CPUAPP so we can write into the same region for data/Variable sharing
+&sram0 {
+	benchmark_shared_memory: benchmark_shared_memory-shm@6fc00 {
+		reg = <0x0006FC00 0x00000400>;
+	};
+};

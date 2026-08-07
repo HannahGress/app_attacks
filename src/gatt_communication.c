@@ -1,11 +1,16 @@
 #include "zephyr/bluetooth/gatt.h"
 #include "zephyr/random/random.h"
 #include <zephyr/shell/shell.h>
-#include "main.h"
-
-#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
-#include <controller/ll_sw/nordic/hal/nrf5/radio/radio.h>
+#include "../include/main.h"
+#if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+#include "../include/nRF52_54_ppi_dppi.h"
+#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUNET)
+#include "../common_nRF5340/shared_varibles.h"
 #endif
+
+// #if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF53X)
+//#include <controller/ll_sw/nordic/hal/nrf5/radio/radio.h>
+// #endif
 
 
 static bool notify_enabled;
@@ -84,13 +89,17 @@ static uint8_t notification_cb(struct bt_conn *conn,
         params->value_handle = 0;
         return BT_GATT_ITER_STOP;
     }
-    #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+
     shell_print(shell, "Notification received (%u bytes)\n", length);
+    #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
     shell_print(shell, "Result t_start_ENDCRYPT: %u", t_start_DECRYPT);
     shell_print(shell, "Result t_end_ENDCRYPT: %u", t_end_ENDCRYPT);
-    shell_print(shell, "Result Difference: %u", t_end_ENDCRYPT - t_start_DECRYPT);
+    shell_print(shell, "Result Difference: %u", delta_DECRYPT);
+    #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUNET)
+    shell_print(shell, "Result t_start_ENDCRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_start_DECRYPT);
+    shell_print(shell, "Result t_end_ENDCRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_end_ENDCRYPT);
+    shell_print(shell, "Result Difference: %u", BENCHMARK_SHARED_VARIABLES->delta_DECRYPT);
     #endif
-
 
     return BT_GATT_ITER_CONTINUE;
 }
@@ -120,7 +129,7 @@ static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
         return BT_GATT_ITER_STOP;
     }
 
-    uint16_t value_handle;
+    uint16_t value_handle = 0;
 
     if (params->type == BT_GATT_DISCOVER_PRIMARY) {
         const struct bt_gatt_service_val *service_attribute_value = attr->user_data;
