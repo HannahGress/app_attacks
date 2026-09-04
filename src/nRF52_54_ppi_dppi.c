@@ -1,7 +1,8 @@
-#include "../include/nRF52_54_ppi_dppi.h"
+#include <nRF52_54_ppi_dppi.h>
 
 #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 #include <hal/nrf_ppi.h>
+#include "zephyr/bluetooth/conn.h"
 #endif
 
 #if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
@@ -14,23 +15,35 @@
 #include <hal/nrf_timer.h>
 #include <hal/nrf_dppi.h>
 #include <hal/nrf_ccm.h>
+#include <hal/nrf_ppib.h>
+#include <zephyr/kernel.h>
 #endif
 
-#if defined(CONFIG_SOC_COMPATIBLE_NRF52LX) || defined(CONFIG_SOC_COMPATIBLE_NRF54L)
+#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+/* We only have KSGEN in the AES-CCM peripheral of the nRF52840 (and nRF5340, but its values are defined elsewhere) */
+/* The nRF54L15 spec does not mention KSGEN as part of the AES-CCm peripheral task */
 volatile bool is_benchmarking;
-// variables to store the time for each time point in the encr/decr chain
-volatile uint32_t t_start_ENCRYPT;
-volatile uint32_t t_start_DECRYPT;
-volatile uint32_t t_end_ENDCRYPT;
-volatile uint32_t enc_count;
-//we must ensure that enc_count is only used while benchmarking
-volatile uint32_t delta_ENCRYPT;
-volatile uint32_t delta_DECRYPT;
-// we allow a maximum of 100 packets transmitted per send_data() method
-#define SUM_ARRAY_MAX_SIZE 100
-volatile uint32_t values_ENCRYPT[SUM_ARRAY_MAX_SIZE];
-volatile uint32_t values_DECRYPT[SUM_ARRAY_MAX_SIZE];
+volatile struct benchmark_measurement encryption_measurement;
+volatile struct benchmark_measurement decryption_measurement;
+volatile struct benchmark_measurement encryption_measurements[SUM_ARRAY_MAX_SIZE];
+volatile struct benchmark_measurement decryption_measurements[SUM_ARRAY_MAX_SIZE];
+volatile uint32_t encryption_measurement_count;
+volatile uint32_t decryption_measurement_count;
 #endif
+
+#if defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+
+K_SEM_DEFINE(encryption_measurement_sem, 0, 1);
+volatile int payload_size_i = 0;
+volatile bool is_benchmarking = false;
+volatile struct benchmark_measurement encryption_measurement;
+volatile struct benchmark_measurement decryption_measurement;
+volatile struct benchmark_measurement encryption_measurements[SUM_ARRAY_MAX_SIZE];
+volatile struct benchmark_measurement decryption_measurements[SUM_ARRAY_MAX_SIZE];
+volatile uint32_t encryption_measurement_count = 0;
+volatile uint32_t decryption_measurement_count = 0;
+#endif
+
 
 /*
  * For benchmarking the nRF53840
@@ -38,24 +51,53 @@ volatile uint32_t values_DECRYPT[SUM_ARRAY_MAX_SIZE];
  */
 #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 
-void hal_radio_ccm_nRF52840_ppi_config(void) {
+void hal_radio_ccm_nRF52840_ppi_config() {
+
+    /*
+     * KSGEN
+     */
+
+    /*
+     * ENCRYPTION:
+     * start of KSGEN is triggered in SW -> radio.c, line 2532
+     * in the function static void *radio_ccm_ext_tx_pkt_set(struct ccm *cnf, uint8_t pdu_type, void *pkt)
+     * We do register this event/this task in a register of the TIMER3 instance.
+     * We don't have a PPI channel for that anymore
+     */
+
+    /*
+     * DECRYPTION:
+     * start of KSGEN is triggered in SW -> radio.c, line 2342
+     * static void *radio_ccm_ext_rx_pkt_set(struct ccm *cnf, uint8_t phy, uint8_t pdu_type, void *pkt)
+     * We do register this event/this task in a register of the TIMER3 instance.
+     * We don't have a PPI channel for that anymore
+     */
+
+    // ENDCR: when KSGEN ends
+    nrf_ppi_channel_endpoint_setup(
+    NRF_PPI,
+    HAL_CRYPT_END_TIME_KSGEN_PPI,
+    (uint32_t)&NRF_CCM->EVENTS_ENDKSGEN,
+    (uint32_t)&NRF_TIMER3->TASKS_CAPTURE[HAL_EVENT_TIMER_KSGEN_END_CC_OFFSET]);
+
+
+    /*
+     * ENCRYPTION & DECRYPTION
+     */
 
     // when encryption starts -> take actual time
     nrf_ppi_channel_endpoint_setup(
     NRF_PPI,
     HAL_CRYPT_START_TIME_ENCRYPT_PPI,
     (uint32_t)&NRF_CCM->EVENTS_ENDKSGEN,
-    //(uint32_t)&NRF_RADIO->EVENTS_ADDRESS,
-    (uint32_t)&NRF_TIMER3->TASKS_CAPTURE[HAL_EVENT_TIMER_CCM_START_ENCRYPT_CC_OFFSET]);
+    (uint32_t)&NRF_TIMER3->TASKS_CAPTURE[HAL_EVENT_TIMER_CCM_START_ENC_CC_OFFSET]);
 
     // when decryption starts (closer to it)
     nrf_ppi_channel_endpoint_setup(
     NRF_PPI,
     HAL_CRYPT_START_TIME_DECRYPT_PPI,
     (uint32_t)&NRF_RADIO->EVENTS_ADDRESS,
-    //(uint32_t)&NRF_RADIO->EVENTS_PAYLOAD,
-    (uint32_t)&NRF_TIMER3->TASKS_CAPTURE[HAL_EVENT_TIMER_CCM_START_DECRYPT_CC_OFFSET]);
-
+    (uint32_t)&NRF_TIMER3->TASKS_CAPTURE[HAL_EVENT_TIMER_CCM_START_DECR_CC_OFFSET]);
 
     // when encryption and decryption ends
     nrf_ppi_channel_endpoint_setup(
@@ -110,97 +152,94 @@ void hal_radio_ccm_nRF54L15_ppi_config(){
 
     /* ENCRYPTION */
 
-    /* RADIO EVENTS_READY -> publish on DPPI channel ENCRYPT_START_DPPI_CHANNEL */
-    nrf_radio_publish_set(
-        NRF_RADIO,
-        NRF_RADIO_EVENT_READY,
-        ENCRYPT_START_DPPI_CHANNEL
-    );
-
-    /* TIMER10 CAPTURE[0] subscribes to DPPI channel ENCRYPT_START_DPPI_CHANNEL */
-    nrf_timer_subscribe_set(
-        NRF_TIMER10,
-        NRF_TIMER_TASK_CAPTURE0,
-        ENCRYPT_START_DPPI_CHANNEL
-    );
-
-    /* Enable DPPI channel ENCRYPT_START_DPPI_CHANNEL in DPPIC10 */
-    nrf_dppi_channels_enable(
-        NRF_DPPIC10,
-        BIT(ENCRYPT_START_DPPI_CHANNEL)
-    );
+    /*
+     * Encryption start is captured in radio.c, line 2521 in the function
+     * static void *radio_ccm_ext_tx_pkt_set(struct ccm *cnf, uint8_t pdu_type, void *pkt)
+     */
 
 
     /* DECRYPTION */
-    /* RADIO EVENTS_PAYLOAD -> publish on DPPI channel DECRYPT_START_DPPI_CHANNEL */
-    nrf_radio_publish_set(
-        NRF_RADIO,
-        NRF_RADIO_EVENT_PAYLOAD,
+    /*
+     * RADIO EVENTS_PAYLOAD -> publish on DPPI channel HAL_TRIGGER_CRYPT_PPI
+     * Therefore, we can listen to this channel and don't need to configure our own publisher anc channel
+     * I addition, the RADIO and MCU reside in different DPPI domains, therefore, we need a PPI Bridge (PPIB)
+     * A PPIB channel can transfer messages between different domains by subscribing and publishing
+     * PPIB10 in RADIO PD is hardwired to PPIB00 in MCU PD (https://docs.nordicsemi.com/r/bundle/ps_nrf54l15/page/ppi.html)
+     */
+
+    /* Our PPIB channel subscribes to the HAL_TRIGGER_CRYPT_PPI */
+    nrf_ppib_subscribe_set(
+        NRF_PPIB10,
+        nrf_ppib_send_task_get(DECRYPT_START_PPIB_CHANNEL),
+    HAL_TRIGGER_CRYPT_PPI
+    );
+
+    /*
+     * MCU domain:
+     * The PPIB channel receives the data in the MCU domain and publishes it onto the DECRYPT_START_DPPI_CHANNEL
+     */
+    nrf_ppib_publish_set(
+        NRF_PPIB00,
+        nrf_ppib_receive_event_get(DECRYPT_START_PPIB_CHANNEL),
         DECRYPT_START_DPPI_CHANNEL
     );
 
-    /* TIMER10 CAPTURE[1] subscribes to DPPI channel DECRYPT_START_DPPI_CHANNEL */
+    /* The TIMER00 instance subscribes to the DECRYPT_START_DPPI_CHANNEL and saves the value into one of its register*/
     nrf_timer_subscribe_set(
-        NRF_TIMER10,
+        NRF_TIMER00,
         NRF_TIMER_TASK_CAPTURE1,
         DECRYPT_START_DPPI_CHANNEL
     );
 
-    /* Enable DPPI channel DECRYPT_START_DPPI_CHANNEL in DPPIC10 */
+    /* Finally, we must activate our DECRYPT_START_DPPI_CHANNEL */
     nrf_dppi_channels_enable(
-        NRF_DPPIC10,
-        BIT(DECRYPT_START_DPPI_CHANNEL)
+        NRF_DPPIC00,
+    BIT(DECRYPT_START_DPPI_CHANNEL)
     );
+
 
     /* ENDCRYPTION */
 
-    /* NRF_CCM EVENTS_ENDCRYPT -> publish on DPPI channel ENDCRYPT_END_DPPI_CHANNEL */
+    /* NRF_CCM EVENTS_ENDCRYPT -> publish on DPPI channel ENDCRYPT_DPPI_CHANNEL */
     nrf_ccm_publish_set(
-        NRF_CCM,
+        NRF_CCM00,
         NRF_CCM_EVENT_END,
-        ENDCRYPT_END_DPPI_CHANNEL
+    ENDCRYPT_DPPI_CHANNEL
     );
 
-    /* TIMER10 CAPTURE[2] subscribes to DPPI channel ENDCRYPT_END_DPPI_CHANNEL */
     nrf_timer_subscribe_set(
-        NRF_TIMER10,
+        NRF_TIMER00,
         NRF_TIMER_TASK_CAPTURE2,
-        ENDCRYPT_END_DPPI_CHANNEL
+        ENDCRYPT_DPPI_CHANNEL
     );
 
-    /* Enable DPPI channel ENDCRYPT_END_DPPI_CHANNEL in DPPIC10 */
     nrf_dppi_channels_enable(
-        NRF_DPPIC10,
-        BIT(ENDCRYPT_END_DPPI_CHANNEL)
+        NRF_DPPIC00,
+        BIT(ENDCRYPT_DPPI_CHANNEL)
     );
-
 }
 
-void hal_radio_ccm_nRF45L15_ppi_disable(){
+void hal_radio_ccm_nRF54L15_ppi_disable(){
 
-    /* ENCRYPTION */
-
-    /* Disable DPPI channel ENCRYPT_START_DPPI_CHANNEL in DPPIC10 */
-    nrf_dppi_channels_disable(
-        NRF_DPPIC10,
-        BIT(ENCRYPT_START_DPPI_CHANNEL)
-    );
-
+    /*
+     * ENCRYPTION
+     * We haven't defined any DPPI channels, so we don't need to disable any
+     */
 
     /* DECRYPTION */
 
-    /* Disable DPPI channel DECRYPT_START_DPPI_CHANNEL in DPPIC10 */
+    /* Disable DPPI channel DECRYPT_START_DPPI_CHANNEL in DPPIC00 */
     nrf_dppi_channels_disable(
-        NRF_DPPIC10,
+        NRF_DPPIC00,
         BIT(DECRYPT_START_DPPI_CHANNEL)
     );
 
     /* ENDCRYPTION */
 
-    /* Disable DPPI channel ENDCRYPT_END_DPPI_CHANNEL in DPPIC10 */
+    /* Disable DPPI channel ENDCRYPT_DPPI_CHANNEL in DPPIC00 */
     nrf_dppi_channels_disable(
-        NRF_DPPIC10,
-        BIT(ENDCRYPT_END_DPPI_CHANNEL)
+        NRF_DPPIC00,
+        BIT(ENDCRYPT_DPPI_CHANNEL)
     );
 
 }

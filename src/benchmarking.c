@@ -1,6 +1,15 @@
 #include <stdlib.h>
 #include <zephyr/shell/shell.h>
-#if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+
+#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+#include <nRF52_54_ppi_dppi.h>
+#include <controller/ll_sw/nordic/hal/nrf5/radio/radio_nrf5_ppi.h>
+#include "zephyr/bluetooth/conn.h"
+#include "zephyr/bluetooth/hci.h"
+#include <main.h>
+#endif
+
+#if defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
 #include <nRF52_54_ppi_dppi.h>
 #endif
 
@@ -8,26 +17,26 @@
 #include <shared_variables.h>
 #endif
 
-#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
-#include <controller/ll_sw/nordic/hal/nrf5/radio/radio_nrf5_ppi.h>
-#endif
-
-uint32_t avg_ENCRYPT;
-
 static void benchmark_on() {
     #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
     is_benchmarking = true;
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-    BENCHMARK_SHARED_VARIABLES->is_benchmarking = true;
+    //BENCHMARK_SHARED_VARIABLES->is_benchmarking = true;
     #endif
 
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+
     hal_radio_ccm_nRF52840_ppi_config();
-    hal_radio_nrf_ppi_channels_enable( BIT(HAL_CRYPT_START_TIME_ENCRYPT_PPI) | BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI));
+
+    /* enable the PPi channels */
+    hal_radio_nrf_ppi_channels_enable(
+        BIT(HAL_CRYPT_END_TIME_KSGEN_PPI) |
+        BIT(HAL_CRYPT_START_TIME_ENCRYPT_PPI) | BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI));
+
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
     send_signal_nRF5340_dppi_config();
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
-    hal_radio_ccm_nRF4L15_ppi_config();
+    hal_radio_ccm_nRF54L15_ppi_config();
     #endif
 }
 
@@ -35,15 +44,17 @@ static void benchmark_off() {
     #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
     is_benchmarking = false;
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-    BENCHMARK_SHARED_VARIABLES->is_benchmarking = false;
+    //BENCHMARK_SHARED_VARIABLES->is_benchmarking = false;
     #endif
 
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
-    hal_radio_nrf_ppi_channels_disable( BIT(HAL_CRYPT_START_TIME_ENCRYPT_PPI) | BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI));
+    hal_radio_nrf_ppi_channels_disable(
+        BIT(HAL_CRYPT_END_TIME_KSGEN_PPI) |
+        BIT(HAL_CRYPT_START_TIME_ENCRYPT_PPI) | BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI));
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP )
     send_signal_nRF5340_dppi_disable();
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
-    hal_radio_ccm_nRF4L15_ppi_disable();
+    hal_radio_ccm_nRF54L15_ppi_disable();
     #endif
 }
 
@@ -78,6 +89,36 @@ int cmd_benchmark(const struct shell *sh, size_t argc, char *argv[])
 
 int cmd_get_time_results(const struct shell *sh, size_t argc, char *argv[]) {
 
+    #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+
+    /* get the length of value array encryption_measurements and decryption_measurements */
+    int length_values_ENCRYPT = sizeof(encryption_measurements) / sizeof(encryption_measurements[0]);
+    int length_values_DECRYPT = sizeof(decryption_measurements) / sizeof(decryption_measurements[0]);
+
+    double sum_ENCRYPT = 0;
+    double sum_DECRYPT = 0;
+
+    int i = 0;
+    int j = 0;
+
+    while(i < length_values_ENCRYPT && encryption_measurements[i].delta_ENDCRYPT != 0) {
+        sum_ENCRYPT += encryption_measurements[i].delta_ENDCRYPT * TIMER_TICK_NS;
+        i++;
+    }
+
+    while(j < length_values_DECRYPT && decryption_measurements[j].delta_ENDCRYPT != 0) {
+        sum_DECRYPT += decryption_measurements[j].delta_ENDCRYPT * TIMER_TICK_NS;
+        j++;
+    }
+
+    double avg_ENCRYPT = (i > 0) ? sum_ENCRYPT / i : 0.0;
+    double avg_DECRYPT = (j > 0) ? sum_DECRYPT / j : 0.0;
+
+    shell_print(sh, "avg_ENCRYPT: %f ns", avg_ENCRYPT);
+    shell_print(sh, "avg_DECRYPT: %f ns", avg_DECRYPT);
+
+    #endif
+
     // TODO: for encryption & ENDCRYPT anpassen
 
     // get the length of value array (values_ENDCRYPT)
@@ -97,10 +138,30 @@ int cmd_get_time_results(const struct shell *sh, size_t argc, char *argv[]) {
     return 0;
 }
 
-void reset_enc_counter() {
-    #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
-    enc_count = 0;
-    #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-    BENCHMARK_SHARED_VARIABLES->enc_count = 0;
-    #endif
+void reset_values() {
+#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+    encryption_measurement = (struct benchmark_measurement){0};
+    decryption_measurement = (struct benchmark_measurement){0};
+    encryption_measurement_count = 0;
+    decryption_measurement_count = 0;
+#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+    //BENCHMARK_SHARED_VARIABLES->enc_count = 0;
+#elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+    encryption_measurement = (struct benchmark_measurement){0};
+    decryption_measurement = (struct benchmark_measurement){0};
+    encryption_measurement_count = 0;
+    decryption_measurement_count = 0;
+#endif
+}
+
+void reset_measurements() {
+#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+    memset((void *)encryption_measurements, 0, sizeof(encryption_measurements));
+    memset((void *)decryption_measurements, 0, sizeof(decryption_measurements));
+#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+    //BENCHMARK_SHARED_VARIABLES->enc_count = 0;
+#elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+    memset((void *)encryption_measurements, 0, sizeof(encryption_measurements));
+    memset((void *)decryption_measurements, 0, sizeof(decryption_measurements));
+#endif
 }

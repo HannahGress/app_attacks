@@ -6,7 +6,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/util.h>
 
-#define SUM_ARRAY_MAX_SIZE 100U
+#define SUM_ARRAY_MAX_SIZE 100
 
 struct benchmark_shared_variables {
 
@@ -25,7 +25,9 @@ struct benchmark_shared_variables {
     volatile uint32_t values_DECRYPT[SUM_ARRAY_MAX_SIZE];
 };
 
-#define BENCHMARK_SHARED_MEMORY_NODE DT_NODELABEL(benchmark_shared_memory)
+/*
+
+#define BENCHMARK_SHARED_MEMORY_NODE DT_NODELABEL(benchmark_shm)
 
 #define BENCHMARK_SHARED_VARIABLES \
 ((volatile struct benchmark_shared_variables *) \
@@ -36,5 +38,6 @@ BUILD_ASSERT(
     DT_REG_SIZE(BENCHMARK_SHARED_MEMORY_NODE),
     "Shared-memory region is too small"
 );
+ */
 
 #endif

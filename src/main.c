@@ -93,9 +93,6 @@ static int advertising_start(void)
 		shell_error(shell, "Advertising failed to start, reason: %d (%s)\n", err, bt_hci_err_to_str(err));
 		return err;
 	}
-
-	shell_print(shell,"Advertising successfully started\n");
-
 	return 0;
 }
 
@@ -603,9 +600,10 @@ static struct bt_conn_auth_info_cb auth_info_cb = {
 };
 
 
-// use NRF_TIMER3 to capture event when BLE encryption is finished
 static void init_timer() {
 	#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+
+	/* TIMER 3*/
 	NRF_TIMER3->TASKS_STOP = 1;
 	NRF_TIMER3->MODE = TIMER_MODE_MODE_Timer;
 	NRF_TIMER3->BITMODE = TIMER_BITMODE_BITMODE_32Bit;
@@ -625,18 +623,18 @@ static void init_timer() {
 
 	#elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
 
-	NRF_TIMER10->TASKS_STOP = 1;
+	NRF_TIMER00->TASKS_STOP = 1;
 
-	NRF_TIMER10->MODE =
+	NRF_TIMER00->MODE =
 		TIMER_MODE_MODE_Timer;
 
-	NRF_TIMER10->BITMODE =
+	NRF_TIMER00->BITMODE =
 		TIMER_BITMODE_BITMODE_32Bit;
 
-	NRF_TIMER10->PRESCALER = 4;  // 16 MHz / 2^4 = 1 MHz
+	NRF_TIMER00->PRESCALER = 0;  // 128 MHz / 7,8125 ns per tick
 
-	NRF_TIMER10->TASKS_CLEAR = 1;
-	NRF_TIMER10->TASKS_START = 1;
+	NRF_TIMER00->TASKS_CLEAR = 1;
+	NRF_TIMER00->TASKS_START = 1;
 	#endif
 }
 
@@ -645,6 +643,7 @@ static void init_timer() {
 */
 
 #if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+/*
 static struct ipc_ept benchmark_ept;
 
 static K_SEM_DEFINE(benchmark_bound_sem, 0, 1);
@@ -660,6 +659,7 @@ static struct ipc_ept_cfg benchmark_ept_cfg = {
 		.bound = benchmark_ept_bound,
 	},
 };
+
 
 int benchmark_ipc_init(void)
 {
@@ -684,9 +684,6 @@ int benchmark_ipc_init(void)
 		return err;
 	}
 
-	/*
-	 * Wait until CPUNET has registered the same endpoint
-	 */
 	err = k_sem_take(&benchmark_bound_sem, K_SECONDS(2));
 
 	if (err) {
@@ -694,7 +691,7 @@ int benchmark_ipc_init(void)
 	}
 
 	return 0;
-}
+}*/
 #endif
 
 
@@ -710,13 +707,13 @@ static int cmd_init(const struct shell *sh)
 	}
 	printf("Bluetooth initialized\n");
 
-	#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-	err = benchmark_ipc_init();
-	if (err) {
-		printf("Benchmark IPC init failed: %d\n", err);
-		return err;
-	}
-	#endif
+	//#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+	//err = benchmark_ipc_init();
+	//if (err) {
+	//	printf("Benchmark IPC init failed: %d\n", err);
+	//	return err;
+	//}
+	//#endif
 
 	err = settings_load();
 	if(err < 0){
@@ -759,11 +756,9 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 {
 
 	const char *count = NULL;
-	const char *pause = NULL;
 	const char *payload_size = NULL;
 	int n = 1; // number of loops. default 1 (if no second argument is specified)
-	int p = 0; // pause in ms
-	int ps = 1; // payload size
+	payload_size_i = 1; // payload size
 	char *endptr;
 
 	// I need at least one argument send_data
@@ -783,22 +778,15 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 			shell_error(sh, "Argument must be numeric.");
 			return -EINVAL;
 		}
-	}
-
-	if (argc > 2) {
-		pause = argv[2];
-		// Convert value in *number into integer
-		p = (int)strtol(pause, &endptr, 10);
-		if (*endptr != '\0') {
-			shell_error(sh, "Argument must be numeric.");
-			return -EINVAL;
+		if(n > 100) {
+			shell_error(sh, "Maximum amount of iterations is 100.");
 		}
 	}
 
-	if (argc > 3) {
-		payload_size = argv[3];
+	if (argc > 2) {
+		payload_size = argv[2];
 		// Convert value in *number into integer
-		ps = (int)strtol(payload_size, &endptr, 10);
+		payload_size_i = (int)strtol(payload_size, &endptr, 10);
 		if (*endptr != '\0') {
 			shell_error(sh, "Argument must be numeric.");
 			return -EINVAL;
@@ -815,50 +803,26 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 	if (default_conn) {
 		for(int i=0; i<n; i++) {
 
-			#if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
-			uint32_t old_enc_count = enc_count;
-			#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-			uint32_t old_enc_count = BENCHMARK_SHARED_VARIABLES->enc_count;
-			#endif
+			while(notification_sent == false) {
+				k_sleep(K_MSEC(500));
+			}
 
-			const int err = send_notification(default_conn, &notification_srv.attrs[2], ps);
+			/* Set the measurement variables to zero */
+			//reset_values();
+
+			const int err = send_notification(default_conn, &notification_srv.attrs[2], payload_size_i);
 			if(err) {
 				shell_error(sh, "Failed to send data. Reason: err=%d", err);
 			}
-
-			k_sleep(K_MSEC(1));
-
-			#if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
-
-			// we wait to be sure that radio has written the new values
-			while (enc_count == old_enc_count) {
-				k_sleep(K_USEC(100));
-			}
-
-			shell_print(sh, "Result t_start_ENDCRYPT: %u", t_start_ENCRYPT);
-			shell_print(sh, "Result t_end_ENDCRYPT: %u", t_end_ENDCRYPT);
-			shell_print(sh, "Difference: %u", delta_ENCRYPT);
-			#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-
-			// we wait to be sure that CPUNET has written the new values
-			while (BENCHMARK_SHARED_VARIABLES->enc_count == old_enc_count) {
-				k_sleep(K_USEC(100));
-			}
-
-			__DMB();
-			shell_print(sh, "Result t_start_ENDCRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_start_ENCRYPT);
-			shell_print(sh, "Result t_end_ENDCRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_end_ENDCRYPT);
-			shell_print(sh, "Difference: %u", BENCHMARK_SHARED_VARIABLES->delta_ENCRYPT);
-			#endif
-
-			// send_notification fires faster than the packets are transmitted, so
-			// including a waiting time "corrects" the longer sending & encryption of the packet
-			k_msleep(p);
-
 		}
 	} else {
 		shell_print(sh, "Not connected");
 	}
+
+	notification_sent = false;
+
+	/* Set the measurement array(s) to zero */
+	// reset_measurements();
 	return 0;
 }
 
@@ -978,7 +942,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD_ARG(ifa3, NULL, "", cmd_ifa_stage3, 1, 0),
 	SHELL_CMD_ARG(ifa4, NULL, "", cmd_ifa_stage4, 3, 0),
 	SHELL_CMD_ARG(ifa, NULL, "ifa addr addr_type n \n addr is target address formatted as "HELP_ADDR_LE" \n n is number of bondings\n", cmd_ifa, 4, 0),
-	SHELL_CMD_ARG(send_data, NULL, HELP_NONE, cmd_send_data, 2, 3),
+	SHELL_CMD_ARG(send_data, NULL, HELP_NONE, cmd_send_data, 2, 2),
 	SHELL_CMD_ARG(benchmark, NULL, "<value: on, off>", cmd_benchmark, 2, 0),
 	SHELL_CMD(discover, NULL, "", cmd_service_and_characteristic_discovery),
 	SHELL_CMD(subscribe, NULL, "", cmd_subscribe),

@@ -1,9 +1,9 @@
 #include "zephyr/bluetooth/gatt.h"
 #include "zephyr/random/random.h"
 #include <zephyr/shell/shell.h>
-#include "../include/main.h"
+#include <main.h>
 #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
-#include "../include/nRF52_54_ppi_dppi.h"
+#include <nRF52_54_ppi_dppi.h>
 #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUNET)
 #include "../common_nRF5340/shared_varibles.h"
 #endif
@@ -12,8 +12,8 @@
 //#include <controller/ll_sw/nordic/hal/nrf5/radio/radio.h>
 // #endif
 
-
-static bool notify_enabled;
+volatile bool notification_sent = true;
+bool notify_enabled;
 #define MAX_PAYLOAD_SIZE 244
 
 /* own UUIDs */
@@ -56,6 +56,55 @@ BT_GATT_SERVICE_DEFINE(notification_srv,
         BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 );
 
+/*
+ * This function is called when the data has been transmitted over the air.
+ * (https://docs.zephyrproject.org/latest/services/connectivity/bluetooth/api/gatt.html)
+ */
+static void notify_complete_cb(struct bt_conn *conn, void *user_data) {
+
+    #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+
+    /*
+     * KSGEN
+     */
+
+    shell_print(shell, "t_start_KSGEN: %u", encryption_measurements[encryption_measurement_count-1].t_start_KSGEN);
+    shell_print(shell, "t_end_KSGEN: %u", encryption_measurements[encryption_measurement_count-1].t_end_KSGEN);
+    shell_print(shell, "delta_KSGEN: %u", encryption_measurements[encryption_measurement_count-1].delta_KSGEN);
+
+
+    /*
+     * ENCRYPT
+     */
+
+    shell_print(shell, "t_start_ENDCRYPT: %u", encryption_measurements[encryption_measurement_count-1].t_start_ENDCRYPT);
+    shell_print(shell, "t_end_ENDCRYPT: %u", encryption_measurements[encryption_measurement_count-1].t_end_ENDCRYPT);
+    shell_print(shell, "delta_ENCRYPT: %u", encryption_measurements[encryption_measurement_count-1].delta_ENDCRYPT);
+
+    // TODO: write the appropriate code for nRF5340
+    /* #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+    shell_print(sh, "Result t_start_ENDCRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_start_ENCRYPT);
+    shell_print(sh, "Result t_end_ENDCRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_end_ENDCRYPT);
+    shell_print(sh, "Difference: %u", BENCHMARK_SHARED_VARIABLES->delta_ENCRYPT);
+    */
+
+    #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+    /*
+     * ENCRYPT
+     */
+
+    k_sem_take(&encryption_measurement_sem, K_FOREVER);
+
+    int index = encryption_measurement_count-1;
+
+    shell_print(shell, "t_start_ENDCRYPT: %f ns", encryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "t_end_ENDCRYPT: %f ns", encryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "delta_ENCRYPT: %f ns", encryption_measurements[index].delta_ENDCRYPT * TIMER_TICK_NS);
+    #endif
+
+    notification_sent = true;
+}
+
 int send_notification(struct bt_conn *conn, const struct bt_gatt_attr *attr, int payload_size)
 {
     // if client has not subscribed yet
@@ -73,8 +122,17 @@ int send_notification(struct bt_conn *conn, const struct bt_gatt_attr *attr, int
     // fill with random bytes
     sys_rand_get(payload, payload_size);
 
-    return bt_gatt_notify(conn, attr, payload, payload_size);
+    struct bt_gatt_notify_params params = {
+        .attr = attr,
+        .data = payload,
+        .len = payload_size,
+        .user_data = &payload_size,
+        .func = notify_complete_cb,
+    };
+
+    return bt_gatt_notify_cb(conn, &params);
 }
+
 
 /*
  * GATT Client
@@ -90,16 +148,54 @@ static uint8_t notification_cb(struct bt_conn *conn,
         return BT_GATT_ITER_STOP;
     }
 
-    shell_print(shell, "Notification received (%u bytes)\n", length);
-    #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
-    shell_print(shell, "Result t_start_ENDCRYPT: %u", t_start_DECRYPT);
-    shell_print(shell, "Result t_end_ENDCRYPT: %u", t_end_ENDCRYPT);
-    shell_print(shell, "Result Difference: %u", delta_DECRYPT);
-    #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUNET)
-    shell_print(shell, "Result t_start_ENDCRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_start_DECRYPT);
+    #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+
+    /*
+     * KSGEN
+     */
+
+    shell_print(shell, "t_start_KSGEN: %u", decryption_measurements[decryption_measurement_count-1].t_start_KSGEN);
+    shell_print(shell, "t_end_KSGEN: %u", decryption_measurements[decryption_measurement_count-1].t_end_KSGEN);
+    shell_print(shell, "delta_KSGEN: %u", decryption_measurements[decryption_measurement_count-1].delta_KSGEN);
+
+    /*
+     * DECRYPT
+     */
+
+    shell_print(shell, "t_start_DECRYPT: %u", decryption_measurements[decryption_measurement_count-1].t_start_ENDCRYPT);
+    shell_print(shell, "t_end_ENDCRYPT: %u", decryption_measurements[decryption_measurement_count-1].t_end_ENDCRYPT);
+    shell_print(shell, "delta_DECRYPT: %u", decryption_measurements[decryption_measurement_count-1].delta_ENDCRYPT);
+
+    #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+    shell_print(shell, "Result t_start_DECRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_start_DECRYPT);
     shell_print(shell, "Result t_end_ENDCRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_end_ENDCRYPT);
-    shell_print(shell, "Result Difference: %u", BENCHMARK_SHARED_VARIABLES->delta_DECRYPT);
+    shell_print(shell, "delta_DECRYPT: %u", BENCHMARK_SHARED_VARIABLES->delta_DECRYPT);
+
+    /* calculate the decr time */
+    BENCHMARK_SHARED_VARIABLES->delta_DECRYPT = BENCHMARK_SHARED_VARIABLES->t_end_ENDCRYPT - BENCHMARK_SHARED_VARIABLES->t_start_DECRYPT;
+
+    if (BENCHMARK_SHARED_VARIABLES->is_benchmarking && BENCHMARK_SHARED_VARIABLES->enc_count < SUM_ARRAY_MAX_SIZE) {
+        /* we want to store the results in our arrays */
+        BENCHMARK_SHARED_VARIABLES->values_DECRYPT[BENCHMARK_SHARED_VARIABLES->enc_count] = BENCHMARK_SHARED_VARIABLES->delta_DECRYPT;
+        BENCHMARK_SHARED_VARIABLES->enc_count++;
+    }
+
+    __DMB();
+
+    #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+    /*
+     * DECRYPT
+     */
+
+    int index = decryption_measurement_count-1;
+
+    shell_print(shell, "t_start_DECRYPT: %f ns", decryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "t_end_ENDCRYPT: %f ns", decryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "delta_DECRYPT: %f ns", decryption_measurements[index].delta_ENDCRYPT * TIMER_TICK_NS);
+
     #endif
+
+    shell_print(shell, "Notification received (%u bytes)\n", length);
 
     return BT_GATT_ITER_CONTINUE;
 }

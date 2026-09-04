@@ -1,5 +1,6 @@
 #pragma once
 
+extern volatile bool notification_sent;
 extern bool notify_enabled;
 extern struct bt_gatt_service_static notification_srv;
 extern int send_notification(struct bt_conn *conn,
