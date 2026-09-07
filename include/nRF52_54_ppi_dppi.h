@@ -48,6 +48,15 @@ void hal_radio_ccm_nRF52840_ppi_config();
 /* We only have KSGEN in the AES-CCM peripheral of the nRF52840 (and nRF5340, but its values are defined elsewhere) */
 /* The nRF54L15 spec does not mention KSGEN as part of the AES-CCm peripheral task */
 
+/* Since our timer runs at 116 MHz, each tick is 62.5 ns. Therefore, we must multiply our results with this number */
+static const double TIMER_TICK_NS = 62.5;
+
+/* Semaphore to ensure that the readout on the shell is consistent */
+extern struct k_sem encryption_measurement_sem;
+
+
+/* We must declare the payload as an external variable, because we later filter for packages with this payload + 7 Bytes header data (+ other data) */
+extern volatile int payload_size_i;
 extern volatile bool is_benchmarking;
 extern volatile struct benchmark_measurement encryption_measurement;
 extern volatile struct benchmark_measurement decryption_measurement;

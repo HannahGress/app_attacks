@@ -89,7 +89,43 @@ int cmd_benchmark(const struct shell *sh, size_t argc, char *argv[])
 
 int cmd_get_time_results(const struct shell *sh, size_t argc, char *argv[]) {
 
-    #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+    #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+
+    /* get the length of value array encryption_measurements and decryption_measurements */
+    int length_values_ENCRYPT = sizeof(encryption_measurements) / sizeof(encryption_measurements[0]);
+    int length_values_DECRYPT = sizeof(decryption_measurements) / sizeof(decryption_measurements[0]);
+
+    double sum_KSGEN_ENCRYPT = 0;
+    double sum_ENCRYPT = 0;
+    double sum_KSGEN_DECRYPT = 0;
+    double sum_DECRYPT = 0;
+
+    int i = 0;
+    int j = 0;
+
+    while(i < length_values_ENCRYPT && encryption_measurements[i].delta_ENDCRYPT != 0) {
+        sum_KSGEN_ENCRYPT += encryption_measurements[i].delta_KSGEN * TIMER_TICK_NS;
+        sum_ENCRYPT += encryption_measurements[i].delta_ENDCRYPT * TIMER_TICK_NS;
+        i++;
+    }
+
+    while(j < length_values_DECRYPT && decryption_measurements[j].delta_ENDCRYPT != 0) {
+        sum_KSGEN_DECRYPT += decryption_measurements[j].delta_KSGEN * TIMER_TICK_NS;
+        sum_DECRYPT += decryption_measurements[j].delta_ENDCRYPT * TIMER_TICK_NS;
+        j++;
+    }
+
+    double avg_KSGEN_ENCRYPT = (i > 0) ? sum_ENCRYPT / i : 0.0;
+    double avg_ENCRYPT = (i > 0) ? sum_ENCRYPT / i : 0.0;
+    double avg_DECRYPT = (j > 0) ? sum_DECRYPT / j : 0.0;
+    double avg_KSGEN_DECRYPT = (j > 0) ? sum_DECRYPT / j : 0.0;
+
+    shell_print(sh, "avg_KSGEN_ENCRYPT: %f ns", avg_KSGEN_ENCRYPT);
+    shell_print(sh, "avg_ENCRYPT: %f ns", avg_ENCRYPT);
+    shell_print(sh, "avg_KSGEN_DECRYPT: %f ns", avg_KSGEN_DECRYPT);
+    shell_print(sh, "avg_DECRYPT: %f ns", avg_DECRYPT);
+
+    #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
 
     /* get the length of value array encryption_measurements and decryption_measurements */
     int length_values_ENCRYPT = sizeof(encryption_measurements) / sizeof(encryption_measurements[0]);
@@ -144,6 +180,8 @@ void reset_values() {
     decryption_measurement = (struct benchmark_measurement){0};
     encryption_measurement_count = 0;
     decryption_measurement_count = 0;
+    memset((void *)encryption_measurements, 0, sizeof(encryption_measurements));
+    memset((void *)decryption_measurements, 0, sizeof(decryption_measurements));
 #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
     //BENCHMARK_SHARED_VARIABLES->enc_count = 0;
 #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
@@ -151,16 +189,6 @@ void reset_values() {
     decryption_measurement = (struct benchmark_measurement){0};
     encryption_measurement_count = 0;
     decryption_measurement_count = 0;
-#endif
-}
-
-void reset_measurements() {
-#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
-    memset((void *)encryption_measurements, 0, sizeof(encryption_measurements));
-    memset((void *)decryption_measurements, 0, sizeof(decryption_measurements));
-#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-    //BENCHMARK_SHARED_VARIABLES->enc_count = 0;
-#elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
     memset((void *)encryption_measurements, 0, sizeof(encryption_measurements));
     memset((void *)decryption_measurements, 0, sizeof(decryption_measurements));
 #endif

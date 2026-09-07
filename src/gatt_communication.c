@@ -62,24 +62,28 @@ BT_GATT_SERVICE_DEFINE(notification_srv,
  */
 static void notify_complete_cb(struct bt_conn *conn, void *user_data) {
 
+    k_sem_take(&encryption_measurement_sem, K_FOREVER);
+
+    int index = encryption_measurement_count-1;
+
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 
     /*
      * KSGEN
      */
 
-    shell_print(shell, "t_start_KSGEN: %u", encryption_measurements[encryption_measurement_count-1].t_start_KSGEN);
-    shell_print(shell, "t_end_KSGEN: %u", encryption_measurements[encryption_measurement_count-1].t_end_KSGEN);
-    shell_print(shell, "delta_KSGEN: %u", encryption_measurements[encryption_measurement_count-1].delta_KSGEN);
+    shell_print(shell, "t_start_KSGEN: %f ns", encryption_measurements[index].t_start_KSGEN * TIMER_TICK_NS);
+    shell_print(shell, "t_end_KSGEN: %f ns", encryption_measurements[index].t_end_KSGEN * TIMER_TICK_NS);
+    shell_print(shell, "delta_KSGEN: %f ns", encryption_measurements[index].delta_KSGEN * TIMER_TICK_NS);
 
 
     /*
      * ENCRYPT
      */
 
-    shell_print(shell, "t_start_ENDCRYPT: %u", encryption_measurements[encryption_measurement_count-1].t_start_ENDCRYPT);
-    shell_print(shell, "t_end_ENDCRYPT: %u", encryption_measurements[encryption_measurement_count-1].t_end_ENDCRYPT);
-    shell_print(shell, "delta_ENCRYPT: %u", encryption_measurements[encryption_measurement_count-1].delta_ENDCRYPT);
+    shell_print(shell, "t_start_ENDCRYPT: %f ns", encryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "t_end_ENDCRYPT: %f ns", encryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "delta_ENCRYPT: %f ns", encryption_measurements[index].delta_ENDCRYPT * TIMER_TICK_NS);
 
     // TODO: write the appropriate code for nRF5340
     /* #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
@@ -92,10 +96,6 @@ static void notify_complete_cb(struct bt_conn *conn, void *user_data) {
     /*
      * ENCRYPT
      */
-
-    k_sem_take(&encryption_measurement_sem, K_FOREVER);
-
-    int index = encryption_measurement_count-1;
 
     shell_print(shell, "t_start_ENDCRYPT: %f ns", encryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
     shell_print(shell, "t_end_ENDCRYPT: %f ns", encryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
@@ -148,23 +148,25 @@ static uint8_t notification_cb(struct bt_conn *conn,
         return BT_GATT_ITER_STOP;
     }
 
+    int index = decryption_measurement_count-1;
+
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 
     /*
      * KSGEN
      */
 
-    shell_print(shell, "t_start_KSGEN: %u", decryption_measurements[decryption_measurement_count-1].t_start_KSGEN);
-    shell_print(shell, "t_end_KSGEN: %u", decryption_measurements[decryption_measurement_count-1].t_end_KSGEN);
-    shell_print(shell, "delta_KSGEN: %u", decryption_measurements[decryption_measurement_count-1].delta_KSGEN);
+    shell_print(shell, "t_start_KSGEN: %f ns", decryption_measurements[index].t_start_KSGEN * TIMER_TICK_NS);
+    shell_print(shell, "t_end_KSGEN: %f ns", decryption_measurements[index].t_end_KSGEN * TIMER_TICK_NS);
+    shell_print(shell, "delta_KSGEN: %f ns", decryption_measurements[index].delta_KSGEN * TIMER_TICK_NS);
 
     /*
      * DECRYPT
      */
 
-    shell_print(shell, "t_start_DECRYPT: %u", decryption_measurements[decryption_measurement_count-1].t_start_ENDCRYPT);
-    shell_print(shell, "t_end_ENDCRYPT: %u", decryption_measurements[decryption_measurement_count-1].t_end_ENDCRYPT);
-    shell_print(shell, "delta_DECRYPT: %u", decryption_measurements[decryption_measurement_count-1].delta_ENDCRYPT);
+    shell_print(shell, "t_start_DECRYPT: %f ns", decryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "t_end_ENDCRYPT: %f ns", decryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "delta_DECRYPT: %f ns", decryption_measurements[index].delta_ENDCRYPT * TIMER_TICK_NS);
 
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
     shell_print(shell, "Result t_start_DECRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_start_DECRYPT);
@@ -186,8 +188,6 @@ static uint8_t notification_cb(struct bt_conn *conn,
     /*
      * DECRYPT
      */
-
-    int index = decryption_measurement_count-1;
 
     shell_print(shell, "t_start_DECRYPT: %f ns", decryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
     shell_print(shell, "t_end_ENDCRYPT: %f ns", decryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);

@@ -22,13 +22,15 @@
 #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 /* We only have KSGEN in the AES-CCM peripheral of the nRF52840 (and nRF5340, but its values are defined elsewhere) */
 /* The nRF54L15 spec does not mention KSGEN as part of the AES-CCm peripheral task */
-volatile bool is_benchmarking;
+K_SEM_DEFINE(encryption_measurement_sem, 0, 1);
+volatile int payload_size_i = 0;
+volatile bool is_benchmarking = false;
 volatile struct benchmark_measurement encryption_measurement;
 volatile struct benchmark_measurement decryption_measurement;
 volatile struct benchmark_measurement encryption_measurements[SUM_ARRAY_MAX_SIZE];
 volatile struct benchmark_measurement decryption_measurements[SUM_ARRAY_MAX_SIZE];
-volatile uint32_t encryption_measurement_count;
-volatile uint32_t decryption_measurement_count;
+volatile uint32_t encryption_measurement_count = 0;
+volatile uint32_t decryption_measurement_count = 0;
 #endif
 
 #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX)

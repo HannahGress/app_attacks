@@ -607,7 +607,7 @@ static void init_timer() {
 	NRF_TIMER3->TASKS_STOP = 1;
 	NRF_TIMER3->MODE = TIMER_MODE_MODE_Timer;
 	NRF_TIMER3->BITMODE = TIMER_BITMODE_BITMODE_32Bit;
-	NRF_TIMER3->PRESCALER = 4;   // 1 MHz → 1 tick = 1 µs
+	NRF_TIMER3->PRESCALER = 1;   // 1 / 16 MHz = 62.5 ns pro Tick
 
 	NRF_TIMER3->TASKS_CLEAR = 1;
 	NRF_TIMER3->TASKS_START = 1;
@@ -944,9 +944,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD_ARG(ifa, NULL, "ifa addr addr_type n \n addr is target address formatted as "HELP_ADDR_LE" \n n is number of bondings\n", cmd_ifa, 4, 0),
 	SHELL_CMD_ARG(send_data, NULL, HELP_NONE, cmd_send_data, 2, 2),
 	SHELL_CMD_ARG(benchmark, NULL, "<value: on, off>", cmd_benchmark, 2, 0),
-	SHELL_CMD(discover, NULL, "", cmd_service_and_characteristic_discovery),
-	SHELL_CMD(subscribe, NULL, "", cmd_subscribe),
-	SHELL_CMD(time_results, NULL, "", cmd_get_time_results),
+	SHELL_CMD(discover, NULL, "Discovery of Services and Characteristics", cmd_service_and_characteristic_discovery),
+	SHELL_CMD(subscribe, NULL, "Subscription to a predefinec characteristic", cmd_subscribe),
+	SHELL_CMD(time_results, NULL, "Get the average time of keystream generation, encryption or decryption", cmd_get_time_results),
+	SHELL_CMD(reset_values, NULL, "Reset benchmarking values, counters and arrays.", reset_values),
 	);
 
 SHELL_CMD_REGISTER(bleframework, &cmds, "Bluetooth shell commands", cmd_default_handler);
