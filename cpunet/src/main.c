@@ -198,14 +198,17 @@ static void hci_ipc_rx(uint8_t *data, size_t len)
 	}
 
 	if (buf) {
+		LOG_INF("Putting HCI command into tx_queue");
 		k_fifo_put(&tx_queue, buf);
-
+		LOG_INF("HCI command queued");
 		LOG_HEXDUMP_DBG(buf->data, buf->len, "Final net buffer:");
 	}
 }
 
 static void tx_thread(void *p1, void *p2, void *p3)
 {
+	LOG_INF("TX THREAD STARTED");
+
 	while (1) {
 		struct net_buf *buf;
 		int err;
@@ -213,7 +216,9 @@ static void tx_thread(void *p1, void *p2, void *p3)
 		/* Wait until a buffer is available */
 		buf = k_fifo_get(&tx_queue, K_FOREVER);
 		/* Pass buffer to the stack */
+		LOG_DBG("CPUNET: sending to controller\n");
 		err = bt_send(buf);
+		LOG_DBG("CPUNET: bt_send returned %d\n", err);
 		if (err) {
 			LOG_ERR("Unable to send (err %d)", err);
 			net_buf_unref(buf);
@@ -361,6 +366,7 @@ static void hci_ept_bound(void *priv)
 
 static void hci_ept_recv(const void *data, size_t len, void *priv)
 {
+	LOG_DBG("CPUNET: HCI RX %u bytes\n", len);
 	LOG_INF("Received message of %u bytes.", len);
 	hci_ipc_rx((uint8_t *) data, len);
 }
@@ -373,6 +379,16 @@ static struct ipc_ept_cfg hci_ept_cfg = {
 		.received = hci_ept_recv,
 	},
 };
+
+void init_timer(){
+	NRF_TIMER2->TASKS_STOP = 1;
+	NRF_TIMER2->MODE = TIMER_MODE_MODE_Timer;
+	NRF_TIMER2->BITMODE = TIMER_BITMODE_BITMODE_32Bit;
+	NRF_TIMER2->PRESCALER = 0;   // 1 / 16 MHz = 62.5 ns per Tick
+
+	NRF_TIMER2->TASKS_CLEAR = 1;
+	NRF_TIMER2->TASKS_START = 1;
+}
 
 /*
 static void benchmark_ept_bound(void *priv)
@@ -397,6 +413,8 @@ static struct ipc_ept_cfg benchmark_ept_cfg = {
 
 int main(void)
 {
+	LOG_INF("CPUNET MAIN START\n");
+
 	int err;
 	const struct device *hci_ipc_instance =
 		DEVICE_DT_GET(DT_CHOSEN(zephyr_bt_hci_ipc));
@@ -407,7 +425,8 @@ int main(void)
 	LOG_DBG("Start");
 
 	/* Enable the raw interface, this will in turn open the HCI driver */
-	bt_enable_raw(&rx_queue);
+	int ret = bt_enable_raw(&rx_queue);
+	LOG_DBG("CPUNET: bt_enable_raw = %d\n", ret);
 
 	/* Spawn the TX thread and start feeding commands and data to the
 	 * controller
@@ -436,12 +455,16 @@ int main(void)
     //    return err;
 	//}
 
+	// init_timer();
+
 	k_sem_take(&ipc_bound_sem, K_FOREVER);
+	LOG_DBG("CPUNET: HCI endpoint bound\n");
 
 	while (1) {
 		struct net_buf *buf;
 
 		buf = k_fifo_get(&rx_queue, K_FOREVER);
+		LOG_DBG("CPUNET: controller response, %u bytes\n", buf->len);
 		hci_ipc_send(buf, HCI_REGULAR_MSG);
 	}
 	return 0;

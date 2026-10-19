@@ -1,3 +1,4 @@
+#include <main.h>
 #include <stdlib.h>
 #include <zephyr/shell/shell.h>
 
@@ -34,10 +35,12 @@ static void benchmark_on() {
         BIT(HAL_CRYPT_START_TIME_ENCRYPT_PPI) | BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI));
 
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-    send_signal_nRF5340_dppi_config();
+    //send_signal_nRF5340_dppi_config();
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
     hal_radio_ccm_nRF54L15_ppi_config();
     #endif
+
+    shell_print(shell, "Benchmarking successfully enabled.");
 }
 
 static void benchmark_off() {
@@ -52,10 +55,12 @@ static void benchmark_off() {
         BIT(HAL_CRYPT_END_TIME_KSGEN_PPI) |
         BIT(HAL_CRYPT_START_TIME_ENCRYPT_PPI) | BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI));
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP )
-    send_signal_nRF5340_dppi_disable();
+    //send_signal_nRF5340_dppi_disable();
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
     hal_radio_ccm_nRF54L15_ppi_disable();
     #endif
+
+    shell_print(shell, "Benchmarking successfully disabled.");
 }
 
 int cmd_benchmark(const struct shell *sh, size_t argc, char *argv[])
@@ -115,15 +120,25 @@ int cmd_get_time_results(const struct shell *sh, size_t argc, char *argv[]) {
         j++;
     }
 
-    double avg_KSGEN_ENCRYPT = (i > 0) ? sum_ENCRYPT / i : 0.0;
+    double avg_KSGEN_ENCRYPT = (i > 0) ? sum_KSGEN_ENCRYPT / i : 0.0;
     double avg_ENCRYPT = (i > 0) ? sum_ENCRYPT / i : 0.0;
+    double avg_KSGEN_DECRYPT = (j > 0) ? sum_KSGEN_DECRYPT / j : 0.0;
     double avg_DECRYPT = (j > 0) ? sum_DECRYPT / j : 0.0;
-    double avg_KSGEN_DECRYPT = (j > 0) ? sum_DECRYPT / j : 0.0;
 
-    shell_print(sh, "avg_KSGEN_ENCRYPT: %f ns", avg_KSGEN_ENCRYPT);
-    shell_print(sh, "avg_ENCRYPT: %f ns", avg_ENCRYPT);
-    shell_print(sh, "avg_KSGEN_DECRYPT: %f ns", avg_KSGEN_DECRYPT);
-    shell_print(sh, "avg_DECRYPT: %f ns", avg_DECRYPT);
+    if(avg_ENCRYPT != 0) {
+        shell_print(sh, "avg_KSGEN_ENCRYPT: %f ns", avg_KSGEN_ENCRYPT);
+        shell_print(sh, "avg_ENCRYPT: %f ns", avg_ENCRYPT);
+    }
+    else if(avg_DECRYPT != 0) {
+        shell_print(sh, "avg_KSGEN_DECRYPT: %f ns", avg_KSGEN_DECRYPT);
+        shell_print(sh, "avg_DECRYPT: %f ns", avg_DECRYPT);
+    }
+    else {
+        shell_print(sh, "No results for key stream generation, encryption and decryption (yet). You must first run send_data <n> <payload> to create some.");
+    }
+
+
+
 
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
 
@@ -150,8 +165,15 @@ int cmd_get_time_results(const struct shell *sh, size_t argc, char *argv[]) {
     double avg_ENCRYPT = (i > 0) ? sum_ENCRYPT / i : 0.0;
     double avg_DECRYPT = (j > 0) ? sum_DECRYPT / j : 0.0;
 
-    shell_print(sh, "avg_ENCRYPT: %f ns", avg_ENCRYPT);
-    shell_print(sh, "avg_DECRYPT: %f ns", avg_DECRYPT);
+    if(avg_ENCRYPT != 0) {
+        shell_print(sh, "avg_ENCRYPT: %f ns", avg_ENCRYPT);
+    }
+    else if(avg_DECRYPT != 0) {
+        shell_print(sh, "avg_DECRYPT: %f ns", avg_DECRYPT);
+    }
+    else {
+        shell_print(sh, "No results for encryption and decryption (yet). You must first run send_data <n> <payload> to create some.");
+    }
 
     #endif
 
@@ -174,6 +196,69 @@ int cmd_get_time_results(const struct shell *sh, size_t argc, char *argv[]) {
     return 0;
 }
 
+int cmd_get_time_results_extended(const struct shell *sh, size_t argc, char *argv[]) {
+
+#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
+
+    /* get the length of value array encryption_measurements and decryption_measurements */
+    int length_values_ENCRYPT = sizeof(encryption_measurements) / sizeof(encryption_measurements[0]);
+    int length_values_DECRYPT = sizeof(decryption_measurements) / sizeof(decryption_measurements[0]);
+
+    int i = 0;
+    int j = 0;
+
+    while(i < length_values_ENCRYPT && encryption_measurements[i].delta_ENDCRYPT != 0) {
+        shell_print(sh, "Iteration %u: \n", i);
+        shell_print(sh, "start_KSGEN %f: ns\n", encryption_measurements[i].t_start_KSGEN * TIMER_TICK_NS);
+        shell_print(sh, "end_KSGEN %f: ns\n", encryption_measurements[i].t_end_KSGEN * TIMER_TICK_NS);
+        shell_print(sh, "delta_KSGEN %f: ns\n", encryption_measurements[i].delta_KSGEN * TIMER_TICK_NS);
+        shell_print(sh, "start_ENCRYPT %f: ns\n", encryption_measurements[i].t_start_ENDCRYPT * TIMER_TICK_NS);
+        shell_print(sh, "end_ENCRYPT %f: ns\n", encryption_measurements[i].t_end_ENDCRYPT * TIMER_TICK_NS);
+        shell_print(sh, "delta_ENCRYPT %f: ns\n", encryption_measurements[i].delta_ENDCRYPT * TIMER_TICK_NS);
+        i ++;
+    }
+
+    while(j < length_values_DECRYPT && decryption_measurements[j].delta_ENDCRYPT != 0) {
+        shell_print(sh, "Iteration %u: \n", j);
+        shell_print(sh, "start_KSGEN %f: ns\n", decryption_measurements[j].t_start_KSGEN * TIMER_TICK_NS);
+        shell_print(sh, "end_KSGEN %f: ns\n", decryption_measurements[j].t_end_KSGEN * TIMER_TICK_NS);
+        shell_print(sh, "delta_KSGEN %f: ns\n", decryption_measurements[j].delta_KSGEN * TIMER_TICK_NS);
+        shell_print(sh, "start_DECRYPT %f: ns\n", decryption_measurements[j].t_start_ENDCRYPT * TIMER_TICK_NS);
+        shell_print(sh, "end_DECRYPT %f: ns\n", decryption_measurements[j].t_end_ENDCRYPT * TIMER_TICK_NS);
+        shell_print(sh, "delta_DECRYPT %f: ns\n", decryption_measurements[j].delta_ENDCRYPT * TIMER_TICK_NS);
+        j++;
+    }
+
+#elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+
+    /* get the length of value array encryption_measurements and decryption_measurements */
+    int length_values_ENCRYPT = sizeof(encryption_measurements) / sizeof(encryption_measurements[0]);
+    int length_values_DECRYPT = sizeof(decryption_measurements) / sizeof(decryption_measurements[0]);
+
+    int i = 0;
+    int j = 0;
+
+    while(i < length_values_ENCRYPT && encryption_measurements[i].delta_ENDCRYPT != 0) {
+        shell_print(sh, "Iteration %u: \n", i);
+        shell_print(sh, "start_ENCRYPT %f: ns\n", encryption_measurements[i].t_start_ENDCRYPT * TIMER_TICK_NS);
+        shell_print(sh, "end_ENCRYPT %f: ns\n", encryption_measurements[i].t_end_ENDCRYPT * TIMER_TICK_NS);
+        shell_print(sh, "delta_ENCRYPT %f: ns\n", encryption_measurements[i].delta_ENDCRYPT * TIMER_TICK_NS);
+        i ++;
+    }
+
+    while(j < length_values_DECRYPT && decryption_measurements[j].delta_ENDCRYPT != 0) {
+        shell_print(sh, "Iteration %u: \n", j);
+        shell_print(sh, "start_DECRYPT %f: ns\n", decryption_measurements[j].t_start_ENDCRYPT * TIMER_TICK_NS);
+        shell_print(sh, "end_DECRYPT %f: ns\n", decryption_measurements[j].t_end_ENDCRYPT * TIMER_TICK_NS);
+        shell_print(sh, "delta_DECRYPT %f: ns\n", decryption_measurements[j].delta_ENDCRYPT * TIMER_TICK_NS);
+        j++;
+    }
+
+#endif
+
+    return 0;
+}
+
 void reset_values() {
 #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
     encryption_measurement = (struct benchmark_measurement){0};
@@ -192,4 +277,5 @@ void reset_values() {
     memset((void *)encryption_measurements, 0, sizeof(encryption_measurements));
     memset((void *)decryption_measurements, 0, sizeof(decryption_measurements));
 #endif
+    shell_print(shell, "Velues successfully reset.");
 }

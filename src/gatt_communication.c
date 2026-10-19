@@ -4,8 +4,9 @@
 #include <main.h>
 #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 #include <nRF52_54_ppi_dppi.h>
-#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUNET)
-#include "../common_nRF5340/shared_varibles.h"
+#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+#include <shared_variables.h>
+#include <nRF52_54_ppi_dppi.h>
 #endif
 
 // #if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF53X)
@@ -62,9 +63,15 @@ BT_GATT_SERVICE_DEFINE(notification_srv,
  */
 static void notify_complete_cb(struct bt_conn *conn, void *user_data) {
 
+    #if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
     k_sem_take(&encryption_measurement_sem, K_FOREVER);
+    #endif
 
+    #if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
     int index = encryption_measurement_count-1;
+    #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+    int index = NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurement_count-1;
+    #endif
 
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 
@@ -81,24 +88,35 @@ static void notify_complete_cb(struct bt_conn *conn, void *user_data) {
      * ENCRYPT
      */
 
-    shell_print(shell, "t_start_ENDCRYPT: %f ns", encryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
-    shell_print(shell, "t_end_ENDCRYPT: %f ns", encryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "t_start_ENCRYPT: %f ns", encryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "t_end_ENCRYPT: %f ns", encryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
     shell_print(shell, "delta_ENCRYPT: %f ns", encryption_measurements[index].delta_ENDCRYPT * TIMER_TICK_NS);
 
-    // TODO: write the appropriate code for nRF5340
-    /* #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-    shell_print(sh, "Result t_start_ENDCRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_start_ENCRYPT);
-    shell_print(sh, "Result t_end_ENDCRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_end_ENDCRYPT);
-    shell_print(sh, "Difference: %u", BENCHMARK_SHARED_VARIABLES->delta_ENCRYPT);
-    */
+
+    #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+    /*
+     * KSGEN
+     */
+
+    shell_print(shell, "t_start_KSGEN: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[index].t_start_KSGEN * TIMER_TICK_NS);
+    shell_print(shell, "t_end_KSGEN: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[index].t_end_KSGEN * TIMER_TICK_NS);
+    shell_print(shell, "delta_KSGEN: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[index].delta_KSGEN * TIMER_TICK_NS);
+
+    /*
+     * ENCRYPT
+     */
+
+    shell_print(shell, "t_start_ENCRYPT: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "t_end_ENCRYPT: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "delta_ENCRYPT: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[index].delta_ENDCRYPT * TIMER_TICK_NS);
+
 
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
     /*
      * ENCRYPT
      */
-
-    shell_print(shell, "t_start_ENDCRYPT: %f ns", encryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
-    shell_print(shell, "t_end_ENDCRYPT: %f ns", encryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "t_start_ENCRYPT: %f ns", encryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "t_end_ENCRYPT: %f ns", encryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
     shell_print(shell, "delta_ENCRYPT: %f ns", encryption_measurements[index].delta_ENDCRYPT * TIMER_TICK_NS);
     #endif
 
@@ -109,10 +127,12 @@ int send_notification(struct bt_conn *conn, const struct bt_gatt_attr *attr, int
 {
     // if client has not subscribed yet
     if (!notify_enabled) {
+        shell_error(shell, "Notifications not enabled");
         return -EINVAL;
     }
 
     if (payload_size <= 0 || payload_size > MAX_PAYLOAD_SIZE) {
+        shell_error(shell, "Invalid payload size: %d", payload_size);
         return -EINVAL;
     }
 
@@ -148,7 +168,11 @@ static uint8_t notification_cb(struct bt_conn *conn,
         return BT_GATT_ITER_STOP;
     }
 
-    int index = decryption_measurement_count-1;
+    #if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+    int index = encryption_measurement_count-1;
+    #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+    int index = NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurement_count-1;
+    #endif
 
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 
@@ -165,24 +189,26 @@ static uint8_t notification_cb(struct bt_conn *conn,
      */
 
     shell_print(shell, "t_start_DECRYPT: %f ns", decryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
-    shell_print(shell, "t_end_ENDCRYPT: %f ns", decryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "t_end_DECRYPT: %f ns", decryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
     shell_print(shell, "delta_DECRYPT: %f ns", decryption_measurements[index].delta_ENDCRYPT * TIMER_TICK_NS);
 
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-    shell_print(shell, "Result t_start_DECRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_start_DECRYPT);
-    shell_print(shell, "Result t_end_ENDCRYPT: %u", BENCHMARK_SHARED_VARIABLES->t_end_ENDCRYPT);
-    shell_print(shell, "delta_DECRYPT: %u", BENCHMARK_SHARED_VARIABLES->delta_DECRYPT);
 
-    /* calculate the decr time */
-    BENCHMARK_SHARED_VARIABLES->delta_DECRYPT = BENCHMARK_SHARED_VARIABLES->t_end_ENDCRYPT - BENCHMARK_SHARED_VARIABLES->t_start_DECRYPT;
+    /*
+    * KSGEN
+    */
 
-    if (BENCHMARK_SHARED_VARIABLES->is_benchmarking && BENCHMARK_SHARED_VARIABLES->enc_count < SUM_ARRAY_MAX_SIZE) {
-        /* we want to store the results in our arrays */
-        BENCHMARK_SHARED_VARIABLES->values_DECRYPT[BENCHMARK_SHARED_VARIABLES->enc_count] = BENCHMARK_SHARED_VARIABLES->delta_DECRYPT;
-        BENCHMARK_SHARED_VARIABLES->enc_count++;
-    }
+    shell_print(shell, "t_start_KSGEN: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurements[index].t_start_KSGEN * TIMER_TICK_NS);
+    shell_print(shell, "t_end_KSGEN: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurements[index].t_end_KSGEN * TIMER_TICK_NS);
+    shell_print(shell, "delta_KSGEN: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurements[index].delta_KSGEN * TIMER_TICK_NS);
 
-    __DMB();
+    /*
+     * DECRYPT
+     */
+
+    shell_print(shell, "t_start_DECRYPT: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "t_end_DECRYPT: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "delta_DECRYPT: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurements[index].delta_ENDCRYPT * TIMER_TICK_NS);
 
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
     /*
@@ -190,7 +216,7 @@ static uint8_t notification_cb(struct bt_conn *conn,
      */
 
     shell_print(shell, "t_start_DECRYPT: %f ns", decryption_measurements[index].t_start_ENDCRYPT * TIMER_TICK_NS);
-    shell_print(shell, "t_end_ENDCRYPT: %f ns", decryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
+    shell_print(shell, "t_end_DECRYPT: %f ns", decryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
     shell_print(shell, "delta_DECRYPT: %f ns", decryption_measurements[index].delta_ENDCRYPT * TIMER_TICK_NS);
 
     #endif
@@ -203,7 +229,7 @@ static uint8_t notification_cb(struct bt_conn *conn,
 static void subscribe_cb(struct bt_conn *conn, uint8_t err,
                          struct bt_gatt_subscribe_params *params)
 {
-    if(err==1) {
+    if (err != 0) {
         shell_error(shell, "Subscribe failed");
     } else {
         shell_print(shell, "Subscribed\n");
@@ -221,7 +247,7 @@ static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
                  struct bt_gatt_discover_params *params)
 {
     if (!attr) {
-        shell_print(shell, "Discovery done\n");
+        shell_print(shell, "Discovery done");
         return BT_GATT_ITER_STOP;
     }
 
@@ -244,7 +270,7 @@ static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
         const struct bt_gatt_chrc *characteristic = attr->user_data;
         value_handle = characteristic->value_handle;
         subscribe_params.value_handle = value_handle;
-        shell_print(shell, "Value handle: 0x%04x\n", characteristic->value_handle);
+        shell_print(shell, "Value handle: 0x%04x", characteristic->value_handle);
     }
 
     // change params for ccc discovery
@@ -254,7 +280,7 @@ static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
     if (params->type == BT_GATT_DISCOVER_DESCRIPTOR) {
         if (!bt_uuid_cmp(attr->uuid, BT_UUID_GATT_CCC)) {
             subscribe_params.ccc_handle = attr->handle;
-            shell_print(shell, "CCC handle: 0x%04x\n", attr->handle);
+            shell_print(shell, "CCC handle: 0x%04x", attr->handle);
         }
     }
 

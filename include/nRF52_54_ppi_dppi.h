@@ -4,14 +4,10 @@
 #include <stdint.h>
 
 #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
-//#include <nrf52840.h>
-//#include <hal/nrf_ppi.h>
 #include <zephyr/bluetooth/conn.h>
-#endif
 
-#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 /*
- * For benchmarking the nRF53840
+ * For benchmarking the nRF52840
  * Timer offsets /variables for capturing start and end of KSGEN and de-/encryption
  */
 
@@ -48,7 +44,7 @@ void hal_radio_ccm_nRF52840_ppi_config();
 /* We only have KSGEN in the AES-CCM peripheral of the nRF52840 (and nRF5340, but its values are defined elsewhere) */
 /* The nRF54L15 spec does not mention KSGEN as part of the AES-CCm peripheral task */
 
-/* Since our timer runs at 116 MHz, each tick is 62.5 ns. Therefore, we must multiply our results with this number */
+/* Since our timer runs at 16 MHz, each tick is 62.5 ns. Therefore, we must multiply our results with this number */
 static const double TIMER_TICK_NS = 62.5;
 
 /* Semaphore to ensure that the readout on the shell is consistent */
@@ -80,8 +76,11 @@ extern volatile uint32_t decryption_measurement_count;
 #endif
 
 #if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-int send_signal_nRF5340_dppi_config();
-int send_signal_nRF5340_dppi_disable();
+// variables etc. are in shared_variables.h
+/* Since our timer runs at 16 MHz, each tick is 62.5 ns. Therefore, we must multiply our results with this number */
+static const double TIMER_TICK_NS = 62.5;
+//int send_signal_nRF5340_dppi_config();
+//int send_signal_nRF5340_dppi_disable();
 #endif
 
 #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
@@ -98,15 +97,18 @@ int send_signal_nRF5340_dppi_disable();
 /*
  * DECRYPTION
  * We must pass an Event from one PPI Domain to another (RADIO to PERI(PHERAL)), therefore, we need a PPI Bridge (PPIB)
+ * Since we work in different domains and bridges, the channel numbers can be the same, because the channels are different
+ * in/for each domain/bridge
  */
-#define DECRYPT_START_PPIB_CHANNEL  1
-#define DECRYPT_START_DPPI_CHANNEL  1
+//#define DECRYPT_START_RADIO_DPPI_CHANNEL  1
+//#define DECRYPT_START_PPIB_CHANNEL  1
+//#define DECRYPT_START_MCU_DPPI_CHANNEL  1
 
 /*
  * ENDCRYPT
  * Measurement in the MCU domain
  */
-#define ENDCRYPT_DPPI_CHANNEL 2
+#define ENDCRYPT_DPPI_CHANNEL 3
 
 extern void hal_radio_ccm_nRF54L15_ppi_config(void);
 extern void hal_radio_ccm_nRF54L15_ppi_disable(void);

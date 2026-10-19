@@ -93,6 +93,7 @@ static int advertising_start(void)
 		shell_error(shell, "Advertising failed to start, reason: %d (%s)\n", err, bt_hci_err_to_str(err));
 		return err;
 	}
+	shell_print(shell,"Advertising successfully started\n");
 	return 0;
 }
 
@@ -111,7 +112,7 @@ static int advertising_stop(void)
 		return err;
 	}
 
-	shell_print(shell, "Advertising successfully stoped\n");
+	shell_print(shell, "Advertising successfully stopped\n");
 
 	return 0;
 }
@@ -128,12 +129,12 @@ static int cmd_advertise(const struct shell *sh, size_t argc, char *argv[])
 
 	if (!strcmp(action, "start")) {
 		return advertising_start();
-	} else if (!strcmp(action, "stop")) {
-		return advertising_stop();
-	} else {
-		shell_help(sh);
-		return SHELL_CMD_HELP_PRINTED;
 	}
+	if (!strcmp(action, "stop")) {
+		return advertising_stop();
+	}
+	shell_help(sh);
+	return SHELL_CMD_HELP_PRINTED;
 }
 
 static bool data_cb(struct bt_data *data, void *user_data)
@@ -195,9 +196,9 @@ static int scan_start(void)
 	if (err) {
 		shell_error(shell,"Scanning failed to start, reason: %d (%s)", err, bt_hci_err_to_str(err));
 		return err;
-	} else {
-		shell_print(shell,"Scanning successfully started");
 	}
+
+	shell_print(shell,"Scanning successfully started");
 
 	return 0;
 }
@@ -209,9 +210,9 @@ static int scan_stop(void)
 	if (err) {
 		shell_error(shell, "Stopping scanning failed, reason: %d (%s)", err, bt_hci_err_to_str(err));
 		return err;
-	} else {
-		shell_print(shell, "Scan successfully stopped");
 	}
+
+	shell_print(shell, "Scan successfully stopped");
 
 	return 0;
 }
@@ -243,7 +244,7 @@ static int cmd_scan(const struct shell *sh, size_t argc, char *argv[])
 static void mtu_exchange_cb(struct bt_conn *conn, uint8_t err,
 				struct bt_gatt_exchange_params *params)
 {
-	printk("%s: MTU exchange %s (%u)\n", __func__,
+	shell_print(shell,"%s: MTU exchange %s (%u)\n", __func__,
 		   err == 0U ? "successful" : "failed",
 		   bt_gatt_get_mtu(conn));
 }
@@ -254,12 +255,12 @@ static struct bt_gatt_exchange_params mtu_exchange_params = {
 
 static int mtu_exchange(struct bt_conn *conn)
 {
-	printk("%s: Current MTU = %u\n", __func__, bt_gatt_get_mtu(conn));
+	shell_print(shell,"%s: Current MTU = %u\n", __func__, bt_gatt_get_mtu(conn));
+	shell_print(shell,"%s: Exchange MTU...\n", __func__);
 
-	printk("%s: Exchange MTU...\n", __func__);
 	int err = bt_gatt_exchange_mtu(conn, &mtu_exchange_params);
 	if (err) {
-		printk("%s: MTU exchange failed (err %d)", __func__, err);
+		shell_error(shell,"%s: MTU exchange failed (err %d)", __func__, err);
 	}
 
 	return err;
@@ -286,7 +287,7 @@ static int cmd_connect(const struct shell *sh, size_t argc, char *argv[])
 	err = bt_conn_le_create(&addr, create_params, BT_LE_CONN_PARAM_DEFAULT, &conn);
 
 	if (err) {
-		shell_error(sh, "Connection failed (%s)", bt_hci_err_to_str(err));
+		shell_error(sh, "Connection failed (err: %d)", err);
 		return -ENOEXEC;
 	}
 
@@ -347,7 +348,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	if (err) {
-		shell_error(shell, "connected(): Failed to connect to %s, reason: %d (%s)\n", addr, err,
+		shell_error(shell, "Failed to connect to %s, reason: %d (%s)\n", addr, err,
 			   bt_hci_err_to_str(err));
 		bt_conn_unref(default_conn);
 		default_conn = NULL;
@@ -378,7 +379,6 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	}
 
 	advertising_stop();
-
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -442,7 +442,7 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err err)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	shell_print(shell, "Pairing failed with %s, reason: %d (%s)", addr, err,
+	shell_error(shell, "Pairing failed with %s, reason: %d (%s)", addr, err,
 			security_err_str(err));
 }
 
@@ -535,14 +535,14 @@ static int cmd_pairing_delete(const struct shell *sh, size_t argc, char *argv[])
 	}
 
 	if (argc < 3) {
-		shell_print(sh, "Both address and address type needed");
+		shell_error(sh, "Both address and address type needed");
 		return -ENOEXEC;
 	} else {
 		err = bt_addr_le_from_str(argv[1], argv[2], &addr);
 	}
 
 	if (err) {
-		shell_print(sh, "Invalid address");
+		shell_error(sh, "Invalid address");
 		return err;
 	}
 
@@ -607,22 +607,12 @@ static void init_timer() {
 	NRF_TIMER3->TASKS_STOP = 1;
 	NRF_TIMER3->MODE = TIMER_MODE_MODE_Timer;
 	NRF_TIMER3->BITMODE = TIMER_BITMODE_BITMODE_32Bit;
-	NRF_TIMER3->PRESCALER = 1;   // 1 / 16 MHz = 62.5 ns pro Tick
+	NRF_TIMER3->PRESCALER = 1;   // 1 / 16 MHz = 62.5 ns per Tick
 
 	NRF_TIMER3->TASKS_CLEAR = 1;
 	NRF_TIMER3->TASKS_START = 1;
 
-	#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP) || defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUNET)
-	NRF_TIMER1->TASKS_STOP = 1;
-	NRF_TIMER1->MODE = TIMER_MODE_MODE_Timer;
-	NRF_TIMER1->BITMODE = TIMER_BITMODE_BITMODE_32Bit;
-	NRF_TIMER1->PRESCALER = 4;   // 1 MHz → 1 tick = 1 µs
-
-	NRF_TIMER1->TASKS_CLEAR = 1;
-	NRF_TIMER1->TASKS_START = 1;
-
 	#elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
-
 	NRF_TIMER00->TASKS_STOP = 1;
 
 	NRF_TIMER00->MODE =
@@ -631,7 +621,7 @@ static void init_timer() {
 	NRF_TIMER00->BITMODE =
 		TIMER_BITMODE_BITMODE_32Bit;
 
-	NRF_TIMER00->PRESCALER = 0;  // 128 MHz / 7,8125 ns per tick
+	NRF_TIMER00->PRESCALER = 0;  // 128 MHz / 7.8125 ns per tick
 
 	NRF_TIMER00->TASKS_CLEAR = 1;
 	NRF_TIMER00->TASKS_START = 1;
@@ -758,7 +748,6 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 	const char *count = NULL;
 	const char *payload_size = NULL;
 	int n = 1; // number of loops. default 1 (if no second argument is specified)
-	payload_size_i = 1; // payload size
 	char *endptr;
 
 	// I need at least one argument send_data
@@ -786,7 +775,11 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 	if (argc > 2) {
 		payload_size = argv[2];
 		// Convert value in *number into integer
+		#if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
 		payload_size_i = (int)strtol(payload_size, &endptr, 10);
+		#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+		NRF5340_SHARED_VARIABLES->benchmark_control.payload_size = (int)strtol(payload_size, &endptr, 10);
+		#endif
 		if (*endptr != '\0') {
 			shell_error(sh, "Argument must be numeric.");
 			return -EINVAL;
@@ -807,22 +800,22 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 				k_sleep(K_MSEC(500));
 			}
 
-			/* Set the measurement variables to zero */
-			//reset_values();
-
-			const int err = send_notification(default_conn, &notification_srv.attrs[2], payload_size_i);
+			int err;
+			#if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+			err = send_notification(default_conn, &notification_srv.attrs[2], payload_size_i);
+			shell_print(sh, "Packet #%u sent.", i+1);
+			#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+			err = send_notification(default_conn, &notification_srv.attrs[2], NRF5340_SHARED_VARIABLES->benchmark_control.payload_size);
+			#endif
 			if(err) {
-				shell_error(sh, "Failed to send data. Reason: err=%d", err);
+				shell_error(sh, "Failed to send data. Reason: err=%d (%s)", err, strerror(-err));
 			}
 		}
 	} else {
 		shell_print(sh, "Not connected");
 	}
-
 	notification_sent = false;
 
-	/* Set the measurement array(s) to zero */
-	// reset_measurements();
 	return 0;
 }
 
@@ -839,8 +832,6 @@ static int cmd_subscribe(const struct shell *sh, size_t argc, char *argv[])
 	int err = bt_gatt_subscribe(default_conn, &subscribe_params);
 	if (err) {
 		shell_error(sh,"Subscribe failed");
-	} else {
-		shell_print(sh,"Subscribing...\n");
 	}
 	return 0;
 }
@@ -947,6 +938,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD(discover, NULL, "Discovery of Services and Characteristics", cmd_service_and_characteristic_discovery),
 	SHELL_CMD(subscribe, NULL, "Subscription to a predefinec characteristic", cmd_subscribe),
 	SHELL_CMD(time_results, NULL, "Get the average time of keystream generation, encryption or decryption", cmd_get_time_results),
+	SHELL_CMD(time_results_extended, NULL, "Get the average time of keystream generation, encryption or decryption", cmd_get_time_results_extended),
 	SHELL_CMD(reset_values, NULL, "Reset benchmarking values, counters and arrays.", reset_values),
 	);
 
