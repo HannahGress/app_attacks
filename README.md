@@ -141,3 +141,55 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
 | // optional: enable benchmarking <br> `bleframework benchmark on`       | // enable benchmarking <br> `bleframework benchmark on`                   |
 |                                                                         | `bleframework send_data <n> <pause> <payload size>`                       |
 |                                                                         | // display encryption time of all n packets sent <br>`bleframework delta` |
+
+
+## Measuring with digital pins (current / power)
+
+The framework can drive a GPIO pin to mark *when* something happens (for example
+the encryption of each packet). You probe that pin with an oscilloscope or a
+Nordic Power Profiler Kit II (PPK2) and trigger on it, so the current trace lines
+up with the event. The pins use **active-low** logic: the line is **1 (idle)**
+normally and **0 (active)** while the event is happening.
+
+We deliberately use **`P0.03`** for this: it is broken out on the DK but has
+nothing connected to it by default, so — unlike an LED pin — it draws no current
+of its own and cannot skew the measurement.
+
+### Built-in marker: encryption of each packet (`P0.03`, nRF52840)
+
+While benchmarking is on, `P0.03` is pulled **low for the duration of every
+AES-CCM operation**. It is driven straight from the CCM hardware events via
+PPI + GPIOTE — no CPU, so there is no software jitter.
+
+Measure the encryption of 100 packets like this (sender side):
+
+```
+bleframework benchmark on      # arms the P0.03 marker + timing capture
+bleframework send_data 100     # send 100 packets; P0.03 pulses low per crypto op
+bleframework benchmark off     # disarms the marker
+```
+
+Probe `P0.03` and trigger on the **falling edge**; each low pulse frames one
+AES-CCM operation.
+
+> **Note:** on the nRF52 the CCM `ENDKSGEN`/`ENDCRYPT` events are shared by
+> encryption *and* decryption, so the pin marks *every* CCM operation. During
+> `send_data` the regular pulses just before each transmission are the
+> encryptions of your outgoing packets.
+
+### Using a different pin or event
+
+To move the marker to another pin, change these defines in
+`app_attacks/include/nRF52_54_ppi_dppi.h`, then rebuild and reflash:
+
+```c
+#define CURRENT_MARKER_PORT  0    // GPIO port: P0 -> 0, P1 -> 1
+#define CURRENT_MARKER_PIN   3    // pin number within that port
+```
+
+Pick a **free** pin — on the nRF52840 DK avoid the LEDs (`P0.13`–`P0.16`) and
+buttons (`P0.11`, `P0.12`, `P0.24`, `P0.25`); other free P0 pins are `P0.02`,
+`P0.04` and `P0.28`. To mark a **different event**, point the two PPI channels in
+`hal_radio_ccm_nRF52840_ppi_config()` at another event/task pair. Each marker
+needs one free GPIOTE channel and two free PPI channels; the BLE controller
+already uses PPI 6–13 and 20–27, so keep to channels 0–5.

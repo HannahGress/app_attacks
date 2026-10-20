@@ -43,6 +43,28 @@
 #define HAL_CRYPT_START_TIME_DECRYPT_PPI 2
 #define HAL_CRYPT_END_TIME_ENDCRYPT_PPI 3
 
+/*
+ * GPIO current-measurement marker (nRF52840)
+ *
+ * Drives a pin LOW for the duration of each AES-CCM operation (active-low),
+ * fired straight from the CCM hardware events over PPI + GPIOTE, so there is
+ * no CPU involvement and no software jitter. It reuses the same two events as
+ * the encryption timing capture above:
+ *   EVENTS_ENDKSGEN -> pin LOW  (crypt starts)
+ *   EVENTS_ENDCRYPT -> pin HIGH (crypt ends)
+ *
+ * NOTE: on the nRF52 the CCM ENDKSGEN/ENDCRYPT events are shared by encryption
+ * and decryption, so the pin marks every CCM operation, not only encryptions.
+ *
+ * To measure a different pin, change PORT/PIN and rebuild + reflash.
+ */
+#define CURRENT_MARKER_PORT          0   /* GPIO port: P0 -> 0, P1 -> 1         */
+#define CURRENT_MARKER_PIN           3   /* P0.03: free on the DK (no LED/button,
+                                          * draws no current of its own)        */
+#define CURRENT_MARKER_GPIOTE_CH     0   /* free GPIOTE channel (0..7)          */
+#define CURRENT_MARKER_ENC_START_PPI 4   /* free PPI channel: pin -> LOW       */
+#define CURRENT_MARKER_ENC_END_PPI   5   /* free PPI channel: pin -> HIGH      */
+
 void hal_radio_ccm_nRF52840_ppi_config();
 
 /* We only have KSGEN in the AES-CCM peripheral of the nRF52840 (and nRF5340, but its values are defined elsewhere) */

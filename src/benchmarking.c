@@ -28,10 +28,11 @@ static void benchmark_on() {
 
     hal_radio_ccm_nRF52840_ppi_config();
 
-    /* enable the PPi channels */
+    /* enable the PPi channels (incl. the P0.03 current-measurement marker) */
     hal_radio_nrf_ppi_channels_enable(
         BIT(HAL_CRYPT_END_TIME_KSGEN_PPI) |
-        BIT(HAL_CRYPT_START_TIME_ENCRYPT_PPI) | BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI));
+        BIT(HAL_CRYPT_START_TIME_ENCRYPT_PPI) | BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI) |
+        BIT(CURRENT_MARKER_ENC_START_PPI) | BIT(CURRENT_MARKER_ENC_END_PPI));
 
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
     send_signal_nRF5340_dppi_config();
@@ -50,7 +51,8 @@ static void benchmark_off() {
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
     hal_radio_nrf_ppi_channels_disable(
         BIT(HAL_CRYPT_END_TIME_KSGEN_PPI) |
-        BIT(HAL_CRYPT_START_TIME_ENCRYPT_PPI) | BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI));
+        BIT(HAL_CRYPT_START_TIME_ENCRYPT_PPI) | BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI) |
+        BIT(CURRENT_MARKER_ENC_START_PPI) | BIT(CURRENT_MARKER_ENC_END_PPI));
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP )
     send_signal_nRF5340_dppi_disable();
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)

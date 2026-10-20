@@ -2,6 +2,8 @@
 
 #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 #include <hal/nrf_ppi.h>
+#include <hal/nrf_gpiote.h>
+#include <hal/nrf_gpio.h>
 #include "zephyr/bluetooth/conn.h"
 #endif
 
@@ -107,6 +109,39 @@ void hal_radio_ccm_nRF52840_ppi_config() {
         HAL_CRYPT_END_TIME_ENDCRYPT_PPI,
         (uint32_t)&(NRF_CCM->EVENTS_ENDCRYPT),
         (uint32_t)&(NRF_TIMER3->TASKS_CAPTURE[HAL_EVENT_TIMER_CCM_END_ENDCRYPT_CC_OFFSET]));
+
+    /*
+     * GPIO CURRENT-MEASUREMENT MARKER (active low) on P0.<CURRENT_MARKER_PIN>
+     *
+     * GPIOTE turns the pin into a peripheral with SET/CLR tasks; PPI fires
+     * those tasks directly from the CCM events, so the pin frames the crypto
+     * window in hardware (no ISR, no gpio_pin_set(), no jitter).
+     *
+     * The GPIOTE channel starts HIGH (idle). CLR drives it LOW at crypt start,
+     * SET drives it back HIGH at crypt end.
+     * (The two PPI channels are enabled/disabled in benchmark_on()/off().)
+     */
+    nrf_gpiote_task_configure(
+        NRF_GPIOTE,
+        CURRENT_MARKER_GPIOTE_CH,
+        NRF_GPIO_PIN_MAP(CURRENT_MARKER_PORT, CURRENT_MARKER_PIN),
+        NRF_GPIOTE_POLARITY_TOGGLE,        /* ignored by the SET/CLR tasks */
+        NRF_GPIOTE_INITIAL_VALUE_HIGH);    /* idle = 1 (active low)        */
+    nrf_gpiote_task_enable(NRF_GPIOTE, CURRENT_MARKER_GPIOTE_CH);
+
+    /* crypt start (ENDKSGEN) -> pin LOW (GPIOTE CLR) */
+    nrf_ppi_channel_endpoint_setup(
+        NRF_PPI,
+        CURRENT_MARKER_ENC_START_PPI,
+        (uint32_t)&NRF_CCM->EVENTS_ENDKSGEN,
+        nrf_gpiote_task_address_get(NRF_GPIOTE, NRF_GPIOTE_TASK_CLR_0));
+
+    /* crypt end (ENDCRYPT) -> pin HIGH (GPIOTE SET) */
+    nrf_ppi_channel_endpoint_setup(
+        NRF_PPI,
+        CURRENT_MARKER_ENC_END_PPI,
+        (uint32_t)&NRF_CCM->EVENTS_ENDCRYPT,
+        nrf_gpiote_task_address_get(NRF_GPIOTE, NRF_GPIOTE_TASK_SET_0));
 }
 #endif
 
