@@ -1,6 +1,7 @@
 #include "zephyr/bluetooth/gatt.h"
 #include "zephyr/random/random.h"
 #include <zephyr/shell/shell.h>
+#include <zephyr/sys/util.h>
 #include <main.h>
 #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 #include <nRF52_54_ppi_dppi.h>
@@ -66,6 +67,12 @@ static void notify_complete_cb(struct bt_conn *conn, void *user_data) {
 
     int index = encryption_measurement_count-1;
 
+    // get payload size from command line rather than a pointer to a stack variable
+    // this way we can report which packet this is for 
+    
+    int payload_size = POINTER_TO_INT(user_data);
+    shell_print(shell, "payload_size: %d bytes", payload_size);
+
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 
     /*
@@ -126,7 +133,7 @@ int send_notification(struct bt_conn *conn, const struct bt_gatt_attr *attr, int
         .attr = attr,
         .data = payload,
         .len = payload_size,
-        .user_data = &payload_size,
+        .user_data = INT_TO_POINTER(payload_size),
         .func = notify_complete_cb,
     };
 
