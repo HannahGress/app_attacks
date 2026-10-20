@@ -768,8 +768,7 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 
 	const char *count = NULL;
 	int n = 1;             // arg 1: number of packets
-	int pause_ms = 0;      // arg 2: pause between sends, in ms
-	payload_size_i = 1;    // arg 3: payload size, in bytes
+	payload_size_i = 1;    // arg 2: payload size, in bytes
 	char *endptr;
 
 	// I need at least one argument send_data
@@ -779,7 +778,7 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 		return SHELL_CMD_HELP_PRINTED;
 	}
 
-	// if I have more than one, I want to adjust packet count, wait time and payload size
+	// if I have more than one, I want to adjust packet count and payload size
 
 	if (argc > 1) {
 		count = argv[1];
@@ -794,18 +793,9 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 		}
 	}
 
-	// arg 2 (optional): pause between sends, in ms
+	// arg 2 (optional): payload size in bytes
 	if (argc > 2) {
-		pause_ms = (int)strtol(argv[2], &endptr, 10);
-		if (*endptr != '\0' || pause_ms < 0) {
-			shell_error(sh, "pause_ms must be a non-negative number.");
-			return -EINVAL;
-		}
-	}
-
-	// arg 3 (optional): payload size, in bytes
-	if (argc > 3) {
-		payload_size_i = (int)strtol(argv[3], &endptr, 10);
+		payload_size_i = (int)strtol(argv[2], &endptr, 10);
 		if (*endptr != '\0') {
 			shell_error(sh, "payload_size must be numeric.");
 			return -EINVAL;
@@ -839,10 +829,6 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 				shell_error(sh, "Failed to send packet %d/%d. Reason: err=%d", i + 1, n, err);
 				notification_sent = true; // if nothing is in flight don't let it affect the next one
 				break;
-			}
-
-			if (pause_ms > 0) {
-				k_sleep(K_MSEC(pause_ms));
 			}
 		}
 	} else {
@@ -973,7 +959,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD_ARG(ifa3, NULL, "", cmd_ifa_stage3, 1, 0),
 	SHELL_CMD_ARG(ifa4, NULL, "", cmd_ifa_stage4, 3, 0),
 	SHELL_CMD_ARG(ifa, NULL, "ifa addr addr_type n \n addr is target address formatted as "HELP_ADDR_LE" \n n is number of bondings\n", cmd_ifa, 4, 0),
-	SHELL_CMD_ARG(send_data, NULL, "<count> [pause_ms] [payload_size]", cmd_send_data, 2, 2),
+	SHELL_CMD_ARG(send_data, NULL, "<count> [payload_size]", cmd_send_data, 2, 2),
 	SHELL_CMD_ARG(benchmark, NULL, "<value: on, off>", cmd_benchmark, 2, 0),
 	SHELL_CMD(discover, NULL, "Discovery of Services and Characteristics", cmd_service_and_characteristic_discovery),
 	SHELL_CMD(subscribe, NULL, "Subscription to a predefinec characteristic", cmd_subscribe),
