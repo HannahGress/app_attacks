@@ -154,7 +154,12 @@ We use **`P0.03`** for this: it has
 nothing connected to it by default, so unlike an LED pin it draws no current
 of its own and cannot skew the measurement.
 
-### Built-in marker: encryption of each packet (`P0.03`, nRF52840)
+### Cross-check marker: every CCM operation (`P0.03`, nRF52840)
+
+> **Important:** `P0.03` (PPK II **D0**) is only a **cross-check**. It marks
+> *all* encryptions **and** decryptions. The relevant measurement (only the
+> encryption of each `send_data` notification) is on **`P0.04`** (PPK II
+> **D1**). Every `P0.04` pulse should line up with exactly one `P0.03` pulse.
 
 While benchmarking is on, `P0.03` is pulled low for the duration of every
 AES-CCM operation. It is driven straight from the CCM hardware events via

@@ -6,5 +6,5 @@ manifest:
   projects:
     - name: zephyr_attacks
       remote: zephyr_attacks
-      revision: main
+      revision: benchmarking-time
       import: true

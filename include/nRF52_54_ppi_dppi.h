@@ -44,17 +44,23 @@
 #define HAL_CRYPT_END_TIME_ENDCRYPT_PPI 3
 
 /*
- * GPIO current-measurement marker (nRF52840)
+ * GPIO current-measurement marker (nRF52840) -- CROSS-CHECK ONLY
  *
- * Drives a pin LOW for the duration of each AES-CCM operation (active-low),
+ * /!\ This pin (P0.03, PPK II D0) is NOT the measurement we are interested in.
+ * /!\ The relevant measurement (only the send_data notification encryption)
+ * /!\ is the DATA-PACKET MARKER on P0.04 (PACKET_MARKER_*, PPK II D1) below.
+ *
+ * P0.03 marks EVERY AES-CCM operation, i.e. all encryptions AND all
+ * decryptions (on the nRF52 the CCM ENDKSGEN/ENDCRYPT events are shared by
+ * both). We keep it only as a reference/sanity check: every P0.04 pulse must
+ * line up with exactly one P0.03 pulse, which shows that the P0.04 filter
+ * picks the right CCM operation.
+ *
+ * Drives the pin LOW for the duration of each AES-CCM operation (active-low),
  * fired straight from the CCM hardware events over PPI + GPIOTE, so there is
- * no CPU involvement and no software jitter. It reuses the same two events as
- * the encryption timing capture above:
+ * no CPU involvement and no software jitter:
  *   EVENTS_ENDKSGEN -> pin LOW  (crypt starts)
  *   EVENTS_ENDCRYPT -> pin HIGH (crypt ends)
- *
- * NOTE: on the nRF52 the CCM ENDKSGEN/ENDCRYPT events are shared by encryption
- * and decryption, so the pin marks every CCM operation, not only encryptions.
  *
  * To measure a different pin, change PORT/PIN and rebuild + reflash.
  */
@@ -65,15 +71,49 @@
 #define CURRENT_MARKER_ENC_START_PPI 4   /* free PPI channel: pin -> LOW       */
 #define CURRENT_MARKER_ENC_END_PPI   5   /* free PPI channel: pin -> HIGH      */
 
+/*
+ * DATA-PACKET MARKER (active low) on P0.<PACKET_MARKER_PIN>  -> wire to PPK II D1
+ *
+ * >>> THIS IS THE RELEVANT MEASUREMENT PIN. <<<
+ * It goes LOW ONLY for the encryption of a real send_data notification, so it
+ * can be used on its own; P0.03 (D0) above is just the cross-check.
+ *
+ * Wired to the same CCM events as the current marker (ENDKSGEN -> LOW,
+ * ENDCRYPT -> HIGH) over PPI + GPIOTE, so the pin edges are hardware-crisp with
+ * no software jitter. The difference: these two PPI channels are kept DISABLED
+ * by default and only enabled, per packet, by the `benchmarked_tx_packet`
+ * filter in the controller (lll_conn.c) for a real send_data TX encryption,
+ * then disabled again in lll_conn_isr_tx. That gates the hardware marker with
+ * the software decision without ever lagging the pin edges.
+ */
+#define PACKET_MARKER_PORT           0   /* GPIO port: P0 -> 0, P1 -> 1         */
+#define PACKET_MARKER_PIN            4   /* P0.04 (AIN2): free on the DK        */
+#define PACKET_MARKER_GPIOTE_CH      1   /* free GPIOTE channel (0..7)          */
+/* NOTE: PPI 6 and 7 are NOT free, the BLE controller owns them
+ * (HAL_EVENT_TIMER_START_PPI / HAL_RADIO_READY_TIME_CAPTURE_PPI) and touching
+ * them causes supervision timeouts (0x08). 17/18 are only used by the
+ * controller with Coded PHY or direction finding enabled, recheck
+ * radio_nrf5_ppi_resources.h if you turn those on. */
+#define PACKET_MARKER_ENC_START_PPI  17  /* free PPI channel: pin -> LOW       */
+#define PACKET_MARKER_ENC_END_PPI    18  /* free PPI channel: pin -> HIGH      */
+
 void hal_radio_ccm_nRF52840_ppi_config();
 
 /* We only have KSGEN in the AES-CCM peripheral of the nRF52840 (and nRF5340, but its values are defined elsewhere) */
 /* The nRF54L15 spec does not mention KSGEN as part of the AES-CCm peripheral task */
 
-/* Since our timer runs at 116 MHz, each tick is 62.5 ns. Therefore, we must multiply our results with this number */
-static const double TIMER_TICK_NS = 62.5;
+/*
+ * Benchmark timer (TIMER3): f_timer = BENCHMARK_TIMER_BASE_FREQ_HZ / 2^BENCHMARK_TIMER_PRESCALER
+ * init_timer() in main.c programs BENCHMARK_TIMER_PRESCALER, and TIMER_TICK_NS is
+ * derived from the same two values, so the conversion to ns can't get out of sync.
+ * 16 MHz, prescaler 0 -> 62.5 ns per tick (32 bit wraps after ~268 s).
+ */
+#define BENCHMARK_TIMER_BASE_FREQ_HZ 16000000UL
+#define BENCHMARK_TIMER_PRESCALER    0
+static const double TIMER_TICK_NS =
+    1e9 / (double)(BENCHMARK_TIMER_BASE_FREQ_HZ >> BENCHMARK_TIMER_PRESCALER);
 
-/* Semaphore to ensure that the readout on the shell is consistent */
+// given by radio ISR (lll_conn_isr_tx) when a new encryption measurement is stored
 extern struct k_sem encryption_measurement_sem;
 
 
@@ -133,10 +173,18 @@ int send_signal_nRF5340_dppi_disable();
 extern void hal_radio_ccm_nRF54L15_ppi_config(void);
 extern void hal_radio_ccm_nRF54L15_ppi_disable(void);
 
-/* Since our timer runs at 128 MHz, each tick is 7.8125 ns. Therefore, we must multiply our results with this number */
-static const double TIMER_TICK_NS = 7.8125;
+/*
+ * Benchmark timer (TIMER00): f_timer = BENCHMARK_TIMER_BASE_FREQ_HZ / 2^BENCHMARK_TIMER_PRESCALER
+ * init_timer() in main.c programs BENCHMARK_TIMER_PRESCALER, and TIMER_TICK_NS is
+ * derived from the same two values, so the conversion to ns can't get out of sync.
+ * TIMER00 is clocked at 128 MHz, prescaler 0 -> 7.8125 ns per tick (32 bit wraps after ~33 s).
+ */
+#define BENCHMARK_TIMER_BASE_FREQ_HZ 128000000UL
+#define BENCHMARK_TIMER_PRESCALER    0
+static const double TIMER_TICK_NS =
+    1e9 / (double)(BENCHMARK_TIMER_BASE_FREQ_HZ >> BENCHMARK_TIMER_PRESCALER);
 
-/* Semaphore to ensure that the readout on the shell is consistent */
+// Given by the radio ISR (lll_conn_isr_tx) when a new encryption measurement is stored
 extern struct k_sem encryption_measurement_sem;
 
 /* We must declare the payload as an external variable, because we later filter for packages with this payload + 7 Bytes header data (+ other data) */

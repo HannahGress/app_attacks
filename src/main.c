@@ -611,6 +611,7 @@ static struct bt_conn_auth_info_cb auth_info_cb = {
 };
 
 
+// configure and start TIMER3 at startup
 static void init_timer() {
 	#if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 
@@ -618,7 +619,7 @@ static void init_timer() {
 	NRF_TIMER3->TASKS_STOP = 1;
 	NRF_TIMER3->MODE = TIMER_MODE_MODE_Timer;
 	NRF_TIMER3->BITMODE = TIMER_BITMODE_BITMODE_32Bit;
-	NRF_TIMER3->PRESCALER = 1;   // 1 / 16 MHz = 62.5 ns pro Tick
+	NRF_TIMER3->PRESCALER = BENCHMARK_TIMER_PRESCALER;   // tick length: see TIMER_TICK_NS
 
 	NRF_TIMER3->TASKS_CLEAR = 1;
 	NRF_TIMER3->TASKS_START = 1;
@@ -642,7 +643,7 @@ static void init_timer() {
 	NRF_TIMER00->BITMODE =
 		TIMER_BITMODE_BITMODE_32Bit;
 
-	NRF_TIMER00->PRESCALER = 0;  // 128 MHz / 7,8125 ns per tick
+	NRF_TIMER00->PRESCALER = BENCHMARK_TIMER_PRESCALER;  // tick length: see TIMER_TICK_NS
 
 	NRF_TIMER00->TASKS_CLEAR = 1;
 	NRF_TIMER00->TASKS_START = 1;

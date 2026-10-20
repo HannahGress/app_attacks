@@ -61,6 +61,9 @@ BT_GATT_SERVICE_DEFINE(notification_srv,
  * This function is called when the data has been transmitted over the air.
  * (https://docs.zephyrproject.org/latest/services/connectivity/bluetooth/api/gatt.html)
  */
+
+// zepyhr calls this after sending
+// it takes the last entry, calculates ticks in nanoseconds and returns it to shell
 static void notify_complete_cb(struct bt_conn *conn, void *user_data) {
 
     // This runs in the Bluetooth TX context and MUST NOT block, otherwise it
@@ -68,7 +71,7 @@ static void notify_complete_cb(struct bt_conn *conn, void *user_data) {
     // / increments the count / gives this sem is not implemented yet, so a
     // blocking K_FOREVER is what froze send_data after one packet.
     // skip the timing block (non-blocking) unless a measurement is really ready!
-    
+
     if (encryption_measurement_count == 0 ||
         k_sem_take(&encryption_measurement_sem, K_NO_WAIT) != 0) {
         int payload_size = POINTER_TO_INT(user_data);

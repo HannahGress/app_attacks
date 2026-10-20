@@ -89,6 +89,8 @@ int cmd_benchmark(const struct shell *sh, size_t argc, char *argv[])
 }
 
 
+// average over array of timer data
+// reset_values to clear for next benchmarking
 int cmd_get_time_results(const struct shell *sh, size_t argc, char *argv[]) {
 
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
@@ -117,10 +119,10 @@ int cmd_get_time_results(const struct shell *sh, size_t argc, char *argv[]) {
         j++;
     }
 
-    double avg_KSGEN_ENCRYPT = (i > 0) ? sum_ENCRYPT / i : 0.0;
+    double avg_KSGEN_ENCRYPT = (i > 0) ? sum_KSGEN_ENCRYPT / i : 0.0;
     double avg_ENCRYPT = (i > 0) ? sum_ENCRYPT / i : 0.0;
     double avg_DECRYPT = (j > 0) ? sum_DECRYPT / j : 0.0;
-    double avg_KSGEN_DECRYPT = (j > 0) ? sum_DECRYPT / j : 0.0;
+    double avg_KSGEN_DECRYPT = (j > 0) ? sum_KSGEN_DECRYPT / j : 0.0;
 
     shell_print(sh, "avg_KSGEN_ENCRYPT: %f ns", avg_KSGEN_ENCRYPT);
     shell_print(sh, "avg_ENCRYPT: %f ns", avg_ENCRYPT);

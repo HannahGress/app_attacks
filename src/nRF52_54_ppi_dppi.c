@@ -55,6 +55,8 @@ volatile uint32_t decryption_measurement_count = 0;
  */
 #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 
+// benchmark on wires the hardware events of the crypto block (CCM) with the TIMER3 via PPI
+// e. g. ENDKSGEN -> capture in CC[2] and ENDCRYPT -> capture in CC[5]
 void hal_radio_ccm_nRF52840_ppi_config() {
 
     /*
@@ -113,11 +115,15 @@ void hal_radio_ccm_nRF52840_ppi_config() {
     /*
      * GPIO CURRENT-MEASUREMENT MARKER (active low) on P0.<CURRENT_MARKER_PIN>
      *
+     * Cross Check only! marks EVERY CCM operation (all encryptions AND
+     * decryptions). The relevant measurement (only the send_data
+     * notification encryption) is the DATA-PACKET MARKER on P0.04 below.
+     *
      * GPIOTE turns the pin into a peripheral with SET/CLR tasks; PPI fires
      * those tasks directly from the CCM events, so the pin frames the crypto
-     * window in hardware (no ISR, no gpio_pin_set(), no jitter).
+     * window in hardware
      *
-     * The GPIOTE channel starts HIGH (idle). CLR drives it LOW at crypt start,
+     * The GPIOTE channel starts HIGH (active-low!). CLR drives it LOW at crypt start,
      * SET drives it back HIGH at crypt end.
      * (The two PPI channels are enabled/disabled in benchmark_on()/off().)
      */
@@ -142,6 +148,40 @@ void hal_radio_ccm_nRF52840_ppi_config() {
         CURRENT_MARKER_ENC_END_PPI,
         (uint32_t)&NRF_CCM->EVENTS_ENDCRYPT,
         nrf_gpiote_task_address_get(NRF_GPIOTE, NRF_GPIOTE_TASK_SET_0));
+
+    /*
+     * DATA-PACKET MARKER (active low) on P0.<PACKET_MARKER_PIN> -> PPK II D1
+     *
+     * >>> THIS IS THE RELEVANT MEASUREMENT PIN (notification encryption only). <<<
+     *
+     * Same hardware path as the current marker above (CCM events -> PPI ->
+     * GPIOTE SET/CLR), on its own GPIOTE channel and PPI channels. We configure
+     * the routing here but DO NOT enable the two PPI channels: they are enabled
+     * per packet by the `benchmarked_tx_packet` filter in lll_conn.c (only for a
+     * real send_data TX encryption) and disabled again in lll_conn_isr_tx, so
+     * the pin dips in lockstep with that one encryption and nothing else.
+     */
+    nrf_gpiote_task_configure(
+        NRF_GPIOTE,
+        PACKET_MARKER_GPIOTE_CH,
+        NRF_GPIO_PIN_MAP(PACKET_MARKER_PORT, PACKET_MARKER_PIN),
+        NRF_GPIOTE_POLARITY_TOGGLE,        /* ignored by the SET/CLR tasks */
+        NRF_GPIOTE_INITIAL_VALUE_HIGH);    /* idle = 1 (active low)        */
+    nrf_gpiote_task_enable(NRF_GPIOTE, PACKET_MARKER_GPIOTE_CH);
+
+    /* crypt start (ENDKSGEN) -> pin LOW (GPIOTE CLR) */
+    nrf_ppi_channel_endpoint_setup(
+        NRF_PPI,
+        PACKET_MARKER_ENC_START_PPI,
+        (uint32_t)&NRF_CCM->EVENTS_ENDKSGEN,
+        nrf_gpiote_task_address_get(NRF_GPIOTE, NRF_GPIOTE_TASK_CLR_1));
+
+    /* crypt end (ENDCRYPT) -> pin HIGH (GPIOTE SET) */
+    nrf_ppi_channel_endpoint_setup(
+        NRF_PPI,
+        PACKET_MARKER_ENC_END_PPI,
+        (uint32_t)&NRF_CCM->EVENTS_ENDCRYPT,
+        nrf_gpiote_task_address_get(NRF_GPIOTE, NRF_GPIOTE_TASK_SET_1));
 }
 #endif
 
