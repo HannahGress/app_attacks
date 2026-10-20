@@ -135,7 +135,7 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
 |                                                                         | `bleframework advertise start`                                            |
 | `bleframework scan start`                                               |                                                                           |
 | // when device A is found <br> `bleframework scan stop`                 |                                                                           |
-| `bleframework pair <BDA (public \| private)>`                           |                                                                           |
+| `bleframework pair <BDA (public \| random)>`                            |                                                                           |
 | // discover the characterisitc to subscribe <br>`bleframework discover` |                                                                           |
 | // subscribe to it <br> `bleframework subscribe`                        |                                                                           |
 | // optional: enable benchmarking <br> `bleframework benchmark on`       | // enable benchmarking <br> `bleframework benchmark on`                   |

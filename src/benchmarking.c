@@ -3,7 +3,7 @@
 
 #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 #include <nRF52_54_ppi_dppi.h>
-#include <controller/ll_sw/nordic/hal/nrf5/radio/radio_nrf5_ppi.h>
+#include <hal/nrf_ppi.h>
 #include "zephyr/bluetooth/conn.h"
 #include "zephyr/bluetooth/hci.h"
 #include <main.h>
@@ -28,8 +28,8 @@ static void benchmark_on() {
 
     hal_radio_ccm_nRF52840_ppi_config();
 
-    /* enable the PPi channels (incl. the P0.03 current-measurement marker) */
-    hal_radio_nrf_ppi_channels_enable(
+    // enable the PPi channels (incl. the P0.03 current-measurement marker)
+    nrf_ppi_channels_enable(NRF_PPI,
         BIT(HAL_CRYPT_END_TIME_KSGEN_PPI) |
         BIT(HAL_CRYPT_START_TIME_ENCRYPT_PPI) | BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI) |
         BIT(CURRENT_MARKER_ENC_START_PPI) | BIT(CURRENT_MARKER_ENC_END_PPI));
@@ -49,7 +49,7 @@ static void benchmark_off() {
     #endif
 
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
-    hal_radio_nrf_ppi_channels_disable(
+    nrf_ppi_channels_disable(NRF_PPI,
         BIT(HAL_CRYPT_END_TIME_KSGEN_PPI) |
         BIT(HAL_CRYPT_START_TIME_ENCRYPT_PPI) | BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI) |
         BIT(CURRENT_MARKER_ENC_START_PPI) | BIT(CURRENT_MARKER_ENC_END_PPI));

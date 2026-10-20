@@ -88,6 +88,17 @@ static const struct bt_data sd[] = {
 
 static int advertising_start(void)
 {
+    
+
+    // -120 = -EALREADY happens when the advertiser's BT_ADV_ENABLED flag is already set
+    // this does not necessarily mean that advertising packets are actually being sent!
+	// We actively have to reset the flag every time we want to start advertising to avoid stale/half resumed states
+    // call advertising stop (bt_le_adv_stop()) -> start clean every time
+
+	/* TODO: check whether we want to eliminate the auto-resume behaviour completely? */
+    
+	(void)bt_le_adv_stop();
+
 	int err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 	if (err) {
 		shell_error(shell, "Advertising failed to start, reason: %d (%s)\n", err, bt_hci_err_to_str(err));
@@ -111,7 +122,7 @@ static int advertising_stop(void)
 		return err;
 	}
 
-	shell_print(shell, "Advertising successfully stoped\n");
+	shell_print(shell, "Advertising successfully stopped\n");
 
 	return 0;
 }
@@ -756,9 +767,9 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 {
 
 	const char *count = NULL;
-	const char *payload_size = NULL;
-	int n = 1; // number of loops. default 1 (if no second argument is specified)
-	payload_size_i = 1; // payload size
+	int n = 1;             // arg 1: number of packets
+	int pause_ms = 0;      // arg 2: pause between sends, in ms
+	payload_size_i = 1;    // arg 3: payload size, in bytes
 	char *endptr;
 
 	// I need at least one argument send_data
@@ -783,12 +794,20 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 		}
 	}
 
+	// arg 2 (optional): pause between sends, in ms
 	if (argc > 2) {
-		payload_size = argv[2];
-		// Convert value in *number into integer
-		payload_size_i = (int)strtol(payload_size, &endptr, 10);
+		pause_ms = (int)strtol(argv[2], &endptr, 10);
+		if (*endptr != '\0' || pause_ms < 0) {
+			shell_error(sh, "pause_ms must be a non-negative number.");
+			return -EINVAL;
+		}
+	}
+
+	// arg 3 (optional): payload size, in bytes
+	if (argc > 3) {
+		payload_size_i = (int)strtol(argv[3], &endptr, 10);
 		if (*endptr != '\0') {
-			shell_error(sh, "Argument must be numeric.");
+			shell_error(sh, "payload_size must be numeric.");
 			return -EINVAL;
 		}
 	}
@@ -803,23 +822,35 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 	if (default_conn) {
 		for(int i=0; i<n; i++) {
 
-			while(notification_sent == false) {
-				k_sleep(K_MSEC(500));
+			// wait (bounded) for the previous notification to finish
+			// notify_complete_cb() sets notification_sent = true on
+			// completion; the 1 s bound stops us hanging forever if a
+			// completion never arrives (e.g. the peer stops acknowledging).
+			int waited_ms = 0;
+			while (notification_sent == false && waited_ms < 1000) {
+				k_sleep(K_MSEC(1));
+				waited_ms++;
 			}
 
-			/* Set the measurement variables to zero */
-			//reset_values();
+			notification_sent = false; // this notification now in flight
 
 			const int err = send_notification(default_conn, &notification_srv.attrs[2], payload_size_i);
 			if(err) {
-				shell_error(sh, "Failed to send data. Reason: err=%d", err);
+				shell_error(sh, "Failed to send packet %d/%d. Reason: err=%d", i + 1, n, err);
+				notification_sent = true; // if nothing is in flight don't let it affect the next one
+				break;
+			}
+
+			if (pause_ms > 0) {
+				k_sleep(K_MSEC(pause_ms));
 			}
 		}
 	} else {
 		shell_print(sh, "Not connected");
 	}
 
-	notification_sent = false;
+	// leave the flag clean so the next send_data starts in a known state
+	notification_sent = true;
 
 	/* Set the measurement array(s) to zero */
 	// reset_measurements();
@@ -942,7 +973,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD_ARG(ifa3, NULL, "", cmd_ifa_stage3, 1, 0),
 	SHELL_CMD_ARG(ifa4, NULL, "", cmd_ifa_stage4, 3, 0),
 	SHELL_CMD_ARG(ifa, NULL, "ifa addr addr_type n \n addr is target address formatted as "HELP_ADDR_LE" \n n is number of bondings\n", cmd_ifa, 4, 0),
-	SHELL_CMD_ARG(send_data, NULL, HELP_NONE, cmd_send_data, 2, 2),
+	SHELL_CMD_ARG(send_data, NULL, "<count> [pause_ms] [payload_size]", cmd_send_data, 2, 2),
 	SHELL_CMD_ARG(benchmark, NULL, "<value: on, off>", cmd_benchmark, 2, 0),
 	SHELL_CMD(discover, NULL, "Discovery of Services and Characteristics", cmd_service_and_characteristic_discovery),
 	SHELL_CMD(subscribe, NULL, "Subscription to a predefinec characteristic", cmd_subscribe),
