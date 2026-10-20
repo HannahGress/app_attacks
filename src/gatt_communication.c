@@ -63,7 +63,19 @@ BT_GATT_SERVICE_DEFINE(notification_srv,
  */
 static void notify_complete_cb(struct bt_conn *conn, void *user_data) {
 
-    k_sem_take(&encryption_measurement_sem, K_FOREVER);
+    // This runs in the Bluetooth TX context and MUST NOT block, otherwise it
+    // stalls the whole BT stack. The path that fills encryption_measurements[]
+    // / increments the count / gives this sem is not implemented yet, so a
+    // blocking K_FOREVER is what froze send_data after one packet.
+    // skip the timing block (non-blocking) unless a measurement is really ready!
+    
+    if (encryption_measurement_count == 0 ||
+        k_sem_take(&encryption_measurement_sem, K_NO_WAIT) != 0) {
+        int payload_size = POINTER_TO_INT(user_data);
+        shell_print(shell, "packet sent (payload_size: %d bytes)", payload_size);
+        notification_sent = true;
+        return;
+    }
 
     int index = encryption_measurement_count-1;
 
