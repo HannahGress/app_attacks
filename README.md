@@ -145,29 +145,24 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
 
 ## Measuring with digital pins (current / power)
 
-The framework can drive a GPIO pin to mark *when* something happens (for example
-the encryption of each packet). You probe that pin with an oscilloscope or a
-Nordic Power Profiler Kit II (PPK2) and trigger on it, so the current trace lines
+The framework can drive a GPIO pin to mark when something happens (for example
+the encryption of each packet). Connect this pin to the PPK II and trigger it, so the current trace lines
 up with the event. The pins use **active-low** logic: the line is **1 (idle)**
 normally and **0 (active)** while the event is happening.
 
-We deliberately use **`P0.03`** for this: it is broken out on the DK but has
-nothing connected to it by default, so — unlike an LED pin — it draws no current
+We use **`P0.03`** for this: it has
+nothing connected to it by default, so unlike an LED pin it draws no current
 of its own and cannot skew the measurement.
 
 ### Built-in marker: encryption of each packet (`P0.03`, nRF52840)
 
-While benchmarking is on, `P0.03` is pulled **low for the duration of every
-AES-CCM operation**. It is driven straight from the CCM hardware events via
-PPI + GPIOTE — no CPU, so there is no software jitter.
+While benchmarking is on, `P0.03` is pulled low for the duration of every
+AES-CCM operation. It is driven straight from the CCM hardware events via
+PPI + GPIOTE without CPI involved, so it is very accurate.
 
-Measure the encryption of 100 packets like this (sender side):
+For measuring 100 packets of a specific payload size, follow the instructions in the table above and start recording in
+the nRF Power Profiler App (via nRF Connect Desktop). There, you can export a CSV for further processing. 
 
-```
-bleframework benchmark on      # arms the P0.03 marker + timing capture
-bleframework send_data 100     # send 100 packets; P0.03 pulses low per crypto op
-bleframework benchmark off     # disarms the marker
-```
 
 Probe `P0.03` and trigger on the **falling edge**; each low pulse frames one
 AES-CCM operation.
@@ -175,7 +170,8 @@ AES-CCM operation.
 > **Note:** on the nRF52 the CCM `ENDKSGEN`/`ENDCRYPT` events are shared by
 > encryption *and* decryption, so the pin marks *every* CCM operation. During
 > `send_data` the regular pulses just before each transmission are the
-> encryptions of your outgoing packets.
+> encryptions of your outgoing packets. Since AES is symmetric encryption, the operations 
+> shouldn't vary much.
 
 ### Using a different pin or event
 
