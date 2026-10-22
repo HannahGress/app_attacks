@@ -39,14 +39,14 @@ void hal_radio_ccm_nRF5340_dppi_config() {
 
     // ENDCR: when KSGEN ends
 
-    /* CCM EVENT_ENDKSGEN -> publish on DPPI channel ENCRYPT_START_DPPI_CHANNEL */
+    /* CCM EVENT_ENDKSGEN -> publish on DPPI channel KSGEN_END_DPPI_CHANNEL */
     nrf_ccm_publish_set(
         NRF_CCM,
         NRF_CCM_EVENT_ENDKSGEN,
-        ENCRYPT_START_DPPI_CHANNEL
+        KSGEN_END_DPPI_CHANNEL
     );
 
-    /* TIMER1 CAPTURE[3] subscribes to DPPI channel ENCRYPT_START_DPPI_CHANNEL */
+    /* TIMER1 CAPTURE[2] subscribes to DPPI channel ENCRYPT_START_DPPI_CHANNEL */
     nrf_timer_subscribe_set(
         NRF_TIMER2,
         NRF_TIMER_TASK_CAPTURE2,
@@ -64,45 +64,52 @@ void hal_radio_ccm_nRF5340_dppi_config() {
     /* ENCRYPTION */
 
     /* CCM EVENT_ENDKSGEN -> publish on DPPI channel ENCRYPT_START_DPPI_CHANNEL */
-    nrf_ccm_publish_set(
-        NRF_CCM,
-        NRF_CCM_EVENT_ENDKSGEN,
-        ENCRYPT_START_DPPI_CHANNEL
-    );
+    //nrf_ccm_publish_set(
+    //    NRF_CCM,
+    //    NRF_CCM_EVENT_ENDKSGEN,
+    //    ENCRYPT_START_DPPI_CHANNEL
+    //);
 
-    /* TIMER1 CAPTURE[3] subscribes to DPPI channel ENCRYPT_START_DPPI_CHANNEL */
+    /* KSGEN END und ENCRYPTION START are the same points in time. Therefore, TIMER1 CAPTURE[2] (KSGEN END)
+     * and TIMER1 CAPTURE[3] (ENCRYPT start) subscribe to the same DPPI channel KSGEN_END_DPPI_CHANNEL */
     nrf_timer_subscribe_set(
         NRF_TIMER2,
         NRF_TIMER_TASK_CAPTURE3,
-        ENCRYPT_START_DPPI_CHANNEL
+        KSGEN_END_DPPI_CHANNEL
     );
 
     /* Enable DPPI channel ENCRYPT_START_DPPI_CHANNEL in DPPIC */
-    nrf_dppi_channels_enable(
-        NRF_DPPIC,
-        BIT(ENCRYPT_START_DPPI_CHANNEL)
-    );
+    //nrf_dppi_channels_enable(
+    //    NRF_DPPIC,
+    //    BIT(ENCRYPT_START_DPPI_CHANNEL)
+    //);
 
 
     /* DECRYPTION */
-    /* RADIO EVENTS_PAYLOAD -> publish on DPPI channel DECRYPT_START_DPPI_CHANNEL */
-    nrf_radio_publish_set(
-        NRF_RADIO,
-        NRF_RADIO_EVENT_ADDRESS,
-        DECRYPT_START_DPPI_CHANNEL
-    );
+    /* RADIO EVENTS_ADDRESS -> publish on DPPI channel DECRYPT_START_DPPI_CHANNEL */
+    //nrf_radio_publish_set(
+    //    NRF_RADIO,
+    //    NRF_RADIO_EVENT_ADDRESS,
+    //    DECRYPT_START_DPPI_CHANNEL
+    //);
 
     /* TIMER1 CAPTURE[4] subscribes to DPPI channel DECRYPT_START_DPPI_CHANNEL */
+    //nrf_timer_subscribe_set(
+    //    NRF_TIMER2,
+    //    NRF_TIMER_TASK_CAPTURE4,
+    //    DECRYPT_START_DPPI_CHANNEL
+    //);
+
+    /* Enable DPPI channel DECRYPT_START_DPPI_CHANNEL in DPPIC */
+    //nrf_dppi_channels_enable(
+    //    NRF_DPPIC,
+    //    BIT(DECRYPT_START_DPPI_CHANNEL)
+    //);
+
     nrf_timer_subscribe_set(
         NRF_TIMER2,
         NRF_TIMER_TASK_CAPTURE4,
-        DECRYPT_START_DPPI_CHANNEL
-    );
-
-    /* Enable DPPI channel DECRYPT_START_DPPI_CHANNEL in DPPIC */
-    nrf_dppi_channels_enable(
-        NRF_DPPIC,
-        BIT(DECRYPT_START_DPPI_CHANNEL)
+        HAL_TRIGGER_CRYPT_PPI
     );
 
 
@@ -133,20 +140,19 @@ void hal_radio_ccm_nRF5340_ppi_disable() {
     /* ENCRYPTION */
 
     /* Disable DPPI channel ENCRYPT_START_DPPI_CHANNEL in DPPIC */
+    //nrf_dppi_channels_disable(
+    //    NRF_DPPIC,
+    //    BIT(ENCRYPT_START_DPPI_CHANNEL)
+    //);
+
+
+    /* KSGEN */
+
+    /* Disable DPPI channel KSGEN_END_DPPI_CHANNEL in DPPIC */
     nrf_dppi_channels_disable(
         NRF_DPPIC,
-        BIT(ENCRYPT_START_DPPI_CHANNEL)
+        BIT(KSGEN_END_DPPI_CHANNEL)
     );
-
-
-    /* DECRYPTION */
-
-    /* Disable DPPI channel DECRYPT_START_DPPI_CHANNEL in DPPIC */
-    nrf_dppi_channels_disable(
-        NRF_DPPIC,
-        BIT(DECRYPT_START_DPPI_CHANNEL)
-    );
-
 
     /* ENDCRYPTION */
 

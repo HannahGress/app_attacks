@@ -35,9 +35,7 @@
 
 /* DPPI Channels */
 #define KSGEN_END_DPPI_CHANNEL 2
-#define ENCRYPT_START_DPPI_CHANNEL 3
-#define DECRYPT_START_DPPI_CHANNEL 4
-#define ENDCRYPT_END_DPPI_CHANNEL 5
+#define ENDCRYPT_END_DPPI_CHANNEL 1 // this channel is exceptionally set to 1, because 5 is already in use
 
 void hal_radio_ccm_nRF5340_dppi_config();
 void hal_radio_ccm_nRF5340_ppi_disable();

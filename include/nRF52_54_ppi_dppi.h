@@ -53,7 +53,6 @@ extern struct k_sem encryption_measurement_sem;
 
 /* We must declare the payload as an external variable, because we later filter for packages with this payload + 7 Bytes header data (+ other data) */
 extern volatile int payload_size_i;
-extern volatile bool is_benchmarking;
 extern volatile struct benchmark_measurement encryption_measurement;
 extern volatile struct benchmark_measurement decryption_measurement;
 
@@ -79,8 +78,6 @@ extern volatile uint32_t decryption_measurement_count;
 // variables etc. are in shared_variables.h
 /* Since our timer runs at 16 MHz, each tick is 62.5 ns. Therefore, we must multiply our results with this number */
 static const double TIMER_TICK_NS = 62.5;
-//int send_signal_nRF5340_dppi_config();
-//int send_signal_nRF5340_dppi_disable();
 #endif
 
 #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
@@ -121,7 +118,6 @@ extern struct k_sem encryption_measurement_sem;
 
 /* We must declare the payload as an external variable, because we later filter for packages with this payload + 7 Bytes header data (+ other data) */
 extern volatile int payload_size_i;
-extern volatile bool is_benchmarking;
 
 /* /!\ we only save ticks in the structs and multiply by TIMER_TICK_NS when printing the values (less time critical and more efficient) */
 extern volatile struct benchmark_measurement encryption_measurement;

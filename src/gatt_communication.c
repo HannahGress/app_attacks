@@ -9,10 +9,6 @@
 #include <nRF52_54_ppi_dppi.h>
 #endif
 
-// #if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF53X)
-//#include <controller/ll_sw/nordic/hal/nrf5/radio/radio.h>
-// #endif
-
 volatile bool notification_sent = true;
 bool notify_enabled;
 #define MAX_PAYLOAD_SIZE 244
@@ -41,7 +37,6 @@ static struct bt_uuid_128 chrc_uuid =
 static void ccc_notification_config_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
     notify_enabled = (value == BT_GATT_CCC_NOTIFY);
-
 }
 
 /* service + characteristic */
@@ -110,7 +105,6 @@ static void notify_complete_cb(struct bt_conn *conn, void *user_data) {
     shell_print(shell, "t_end_ENCRYPT: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[index].t_end_ENDCRYPT * TIMER_TICK_NS);
     shell_print(shell, "delta_ENCRYPT: %f ns", NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[index].delta_ENDCRYPT * TIMER_TICK_NS);
 
-
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
     /*
      * ENCRYPT
@@ -169,9 +163,9 @@ static uint8_t notification_cb(struct bt_conn *conn,
     }
 
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
-    int index = encryption_measurement_count-1;
+    int index = decryption_measurement_count-1;
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-    int index = NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurement_count-1;
+    int index = NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurement_count-1;
     #endif
 
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)

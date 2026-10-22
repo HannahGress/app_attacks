@@ -34,9 +34,8 @@
 #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/ipc/ipc_service.h>
-#include <ipc_service.h>
 #include <shared_variables.h>
+#include <../include/ipc_service.h>
 #endif
 #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
 #include <nrf54l15_global.h>
@@ -169,7 +168,12 @@ static void scan_started(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 		}
 
 	/* connect only to devices in close proximity */
-	if (rssi > -50) {
+	/* The nRF5340 needs a higher threshold to find devices being 7-10cm far away */
+	#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+	if (rssi > -70) {
+	#elif defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+	if (rssi > -70) {
+	#endif
 		bt_addr_le_to_str(addr, dev, sizeof(dev));
 		(void)memset(name, 0, sizeof(name));
 
@@ -628,63 +632,6 @@ static void init_timer() {
 	#endif
 }
 
-/**
-* Define IPC for the two cores
-*/
-
-#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-/*
-static struct ipc_ept benchmark_ept;
-
-static K_SEM_DEFINE(benchmark_bound_sem, 0, 1);
-
-static void benchmark_ept_bound(void *priv)
-{
-	k_sem_give(&benchmark_bound_sem);
-}
-
-static struct ipc_ept_cfg benchmark_ept_cfg = {
-	.name = BENCHMARK_ENDPOINT_NAME,
-	.cb = {
-		.bound = benchmark_ept_bound,
-	},
-};
-
-
-int benchmark_ipc_init(void)
-{
-	const struct device *ipc_instance =
-		DEVICE_DT_GET(DT_NODELABEL(ipc0));
-
-	int err;
-
-	err = ipc_service_open_instance(ipc_instance);
-
-	if (err < 0 && err != -EALREADY) {
-		return err;
-	}
-
-	err = ipc_service_register_endpoint(
-		ipc_instance,
-		&benchmark_ept,
-		&benchmark_ept_cfg
-	);
-
-	if (err < 0) {
-		return err;
-	}
-
-	err = k_sem_take(&benchmark_bound_sem, K_SECONDS(2));
-
-	if (err) {
-		return -ETIMEDOUT;
-	}
-
-	return 0;
-}*/
-#endif
-
-
 static int cmd_init(const struct shell *sh)
 {
 	int err;
@@ -697,13 +644,13 @@ static int cmd_init(const struct shell *sh)
 	}
 	printf("Bluetooth initialized\n");
 
-	//#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-	//err = benchmark_ipc_init();
-	//if (err) {
-	//	printf("Benchmark IPC init failed: %d\n", err);
-	//	return err;
-	//}
-	//#endif
+	#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+	err = benchmark_ipc_init();
+	if (err) {
+		printf("Benchmark IPC init failed: %d\n", err);
+		return err;
+	}
+	#endif
 
 	err = settings_load();
 	if(err < 0){
@@ -778,6 +725,8 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 		#if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
 		payload_size_i = (int)strtol(payload_size, &endptr, 10);
 		#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+		shell_print(sh, "send_data count=%u",
+			NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurement_count);
 		NRF5340_SHARED_VARIABLES->benchmark_control.payload_size = (int)strtol(payload_size, &endptr, 10);
 		#endif
 		if (*endptr != '\0') {

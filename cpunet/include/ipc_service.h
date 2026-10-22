@@ -1,0 +1,1 @@
+void benchmark_command_received(const void *data, size_t len, void *priv);

@@ -28,7 +28,6 @@ struct benchmark_results {
 struct benchmark_control {
     /* We must declare the payload as an external variable, because we later filter for packages with this payload + 7 Bytes header data (+ other data) */
     int32_t payload_size;
-    uint32_t is_benchmarking; // TODO bool?
 };
 
 struct benchmark_shared_variables {

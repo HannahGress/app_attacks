@@ -1,10 +1,8 @@
 #include <zephyr/ipc/ipc_service.h>
-#include <ipc_service.h>
-#include <nRF5340_dppi.h>
+#include "../../common_nRF5340/include/ipc_service.h"
+#include "../include/nRF5340_dppi.h"
 
-//static struct ipc_ept benchmark_ept;
-/*
-static void benchmark_command_received(
+void benchmark_command_received(
     const void *data,
     size_t len,
     void *priv
@@ -31,4 +29,3 @@ static void benchmark_command_received(
             break;
     }
 }
-*/

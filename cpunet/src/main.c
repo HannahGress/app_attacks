@@ -26,7 +26,9 @@
 
 #include <zephyr/logging/log_ctrl.h>
 #include <zephyr/logging/log.h>
-#include <ipc_service.h>
+#include "../include/ipc_service.h"
+#include "../../common_nRF5340/include/ipc_service.h"
+#include <hal/nrf_timer.h>
 
 
 LOG_MODULE_REGISTER(hci_ipc, CONFIG_BT_LOG_LEVEL);
@@ -35,7 +37,7 @@ BUILD_ASSERT(!IS_ENABLED(CONFIG_BT_CONN) || IS_ENABLED(CONFIG_BT_HCI_ACL_FLOW_CO
 	     "HCI IPC driver can drop ACL data without Controller-to-Host ACL flow control");
 
 static struct ipc_ept hci_ept;
-//static struct ipc_ept benchmark_ept;
+static struct ipc_ept benchmark_ept;
 
 static K_THREAD_STACK_DEFINE(tx_thread_stack, CONFIG_BT_HCI_TX_STACK_SIZE);
 static struct k_thread tx_thread_data;
@@ -390,13 +392,13 @@ void init_timer(){
 	NRF_TIMER2->TASKS_START = 1;
 }
 
-/*
+
 static void benchmark_ept_bound(void *priv)
 {
 	// Optional: Flag oder Logausgabe setzen.
 }
 
-static void benchmark_command_received(const void *data, size_t len, void *priv)
+static void benchmark_ept_recv(const void *data, size_t len, void *priv)
 {
 	benchmark_command_received(data, len, priv);
 }
@@ -405,10 +407,10 @@ static struct ipc_ept_cfg benchmark_ept_cfg = {
 	.name = BENCHMARK_ENDPOINT_NAME,
 	.cb = {
 		.bound = benchmark_ept_bound,
-		.received = benchmark_command_received,
+		.received = benchmark_ept_recv,
 	},
 };
-*/
+
 
 
 int main(void)
@@ -448,14 +450,14 @@ int main(void)
         return err;
 	}
 
-	//err = ipc_service_register_endpoint(hci_ipc_instance, &benchmark_ept, &benchmark_ept_cfg);
+	err = ipc_service_register_endpoint(hci_ipc_instance, &benchmark_ept, &benchmark_ept_cfg);
 
-	//if (err) {
-	//	LOG_ERR("Registering benchmark endpoint failed: %d", err);
-    //    return err;
-	//}
+	if (err) {
+		LOG_ERR("Registering benchmark endpoint failed: %d", err);
+        return err;
+	}
 
-	// init_timer();
+	init_timer();
 
 	k_sem_take(&ipc_bound_sem, K_FOREVER);
 	LOG_DBG("CPUNET: HCI endpoint bound\n");
