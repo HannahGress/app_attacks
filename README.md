@@ -128,12 +128,12 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
 - Attach two boards
 - Optional: Attach a PPK II
 - Open cmd
-- Switch to `ble_framework attacks`
+- Switch to `app_attacks`
 - Activate the virtual environment (`.ble-venv\Scripts\activate.bat`)
 - `cd serial_interface`
 - `python serial_controller.py`
 - Follow the instructions on the terminal
-- 
+  
 ## [INFO ONLY] What's happening under the hood during benchmarking
 
 | Device A                                                                | Device B                                                                            |
@@ -152,20 +152,6 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
 
 # Troubleshooting
 - In case of any failure, reset the board(s). If this does not help. reflash the appropriate firmware.
-
-| Device A                                                                | Device B                                                                  |
-|-------------------------------------------------------------------------|---------------------------------------------------------------------------|
-| `bleframework init`                                                     | `bleframework init`                                                       |
-|                                                                         | `bleframework advertise start`                                            |
-| `bleframework scan start`                                               |                                                                           |
-| // when device A is found <br> `bleframework scan stop`                 |                                                                           |
-| `bleframework pair <BDA (public \| random)>`                            |                                                                           |
-| // discover the characterisitc to subscribe <br>`bleframework discover` |                                                                           |
-| // subscribe to it <br> `bleframework subscribe`                        |                                                                           |
-| // optional: enable benchmarking <br> `bleframework benchmark on`       | // enable benchmarking <br> `bleframework benchmark on`                   |
-|                                                                         | `bleframework send_data <n> <pause> <payload size>`                       |
-|                                                                         | // display encryption time of all n packets sent <br>`bleframework delta` |
-
 
 ## Measuring with digital pins (current / power)
 
