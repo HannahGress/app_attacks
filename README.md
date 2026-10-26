@@ -127,9 +127,9 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
 ## Automation of benchmarking
 - Attach two boards
 - Optional: Attach a PPK II
-- Open cmd
+- Open cmd or just use the CLion Terminal
 - Switch to `app_attacks`
-- Activate the virtual environment (`.ble-venv\Scripts\activate.bat`)
+- Activate the virtual environment, e. g. (`.ble-venv\Scripts\activate.bat`) or (`.\.venv\Scripts\Activate.ps1`)
 - `cd serial_interface`
 - `python serial_controller.py`
 - Follow the instructions on the terminal
