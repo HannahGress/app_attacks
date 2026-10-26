@@ -34,9 +34,8 @@
 #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/ipc/ipc_service.h>
-#include <ipc_service.h>
 #include <shared_variables.h>
+#include <../include/ipc_service.h>
 #endif
 #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
 #include <nrf54l15_global.h>
@@ -88,7 +87,7 @@ static const struct bt_data sd[] = {
 
 static int advertising_start(void)
 {
-    
+
 
     // -120 = -EALREADY happens when the advertiser's BT_ADV_ENABLED flag is already set
     // this does not necessarily mean that advertising packets are actually being sent!
@@ -96,7 +95,7 @@ static int advertising_start(void)
     // call advertising stop (bt_le_adv_stop()) -> start clean every time
 
 	/* TODO: check whether we want to eliminate the auto-resume behaviour completely? */
-    
+
 	(void)bt_le_adv_stop();
 
 	int err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
@@ -104,6 +103,7 @@ static int advertising_start(void)
 		shell_error(shell, "Advertising failed to start, reason: %d (%s)\n", err, bt_hci_err_to_str(err));
 		return err;
 	}
+	shell_print(shell,"Advertising successfully started\n");
 	return 0;
 }
 
@@ -139,12 +139,12 @@ static int cmd_advertise(const struct shell *sh, size_t argc, char *argv[])
 
 	if (!strcmp(action, "start")) {
 		return advertising_start();
-	} else if (!strcmp(action, "stop")) {
-		return advertising_stop();
-	} else {
-		shell_help(sh);
-		return SHELL_CMD_HELP_PRINTED;
 	}
+	if (!strcmp(action, "stop")) {
+		return advertising_stop();
+	}
+	shell_help(sh);
+	return SHELL_CMD_HELP_PRINTED;
 }
 
 static bool data_cb(struct bt_data *data, void *user_data)
@@ -179,7 +179,12 @@ static void scan_started(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 		}
 
 	/* connect only to devices in close proximity */
-	if (rssi > -50) {
+	/* The nRF5340 needs a higher threshold to find devices being 7-10cm far away */
+	#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+	if (rssi > -70) {
+	#elif defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+	if (rssi > -70) {
+	#endif
 		bt_addr_le_to_str(addr, dev, sizeof(dev));
 		(void)memset(name, 0, sizeof(name));
 
@@ -206,9 +211,9 @@ static int scan_start(void)
 	if (err) {
 		shell_error(shell,"Scanning failed to start, reason: %d (%s)", err, bt_hci_err_to_str(err));
 		return err;
-	} else {
-		shell_print(shell,"Scanning successfully started");
 	}
+
+	shell_print(shell,"Scanning successfully started");
 
 	return 0;
 }
@@ -220,9 +225,9 @@ static int scan_stop(void)
 	if (err) {
 		shell_error(shell, "Stopping scanning failed, reason: %d (%s)", err, bt_hci_err_to_str(err));
 		return err;
-	} else {
-		shell_print(shell, "Scan successfully stopped");
 	}
+
+	shell_print(shell, "Scan successfully stopped");
 
 	return 0;
 }
@@ -254,7 +259,7 @@ static int cmd_scan(const struct shell *sh, size_t argc, char *argv[])
 static void mtu_exchange_cb(struct bt_conn *conn, uint8_t err,
 				struct bt_gatt_exchange_params *params)
 {
-	printk("%s: MTU exchange %s (%u)\n", __func__,
+	shell_print(shell,"%s: MTU exchange %s (%u)\n", __func__,
 		   err == 0U ? "successful" : "failed",
 		   bt_gatt_get_mtu(conn));
 }
@@ -265,12 +270,12 @@ static struct bt_gatt_exchange_params mtu_exchange_params = {
 
 static int mtu_exchange(struct bt_conn *conn)
 {
-	printk("%s: Current MTU = %u\n", __func__, bt_gatt_get_mtu(conn));
+	shell_print(shell,"%s: Current MTU = %u\n", __func__, bt_gatt_get_mtu(conn));
+	shell_print(shell,"%s: Exchange MTU...\n", __func__);
 
-	printk("%s: Exchange MTU...\n", __func__);
 	int err = bt_gatt_exchange_mtu(conn, &mtu_exchange_params);
 	if (err) {
-		printk("%s: MTU exchange failed (err %d)", __func__, err);
+		shell_error(shell,"%s: MTU exchange failed (err %d)", __func__, err);
 	}
 
 	return err;
@@ -297,7 +302,7 @@ static int cmd_connect(const struct shell *sh, size_t argc, char *argv[])
 	err = bt_conn_le_create(&addr, create_params, BT_LE_CONN_PARAM_DEFAULT, &conn);
 
 	if (err) {
-		shell_error(sh, "Connection failed (%s)", bt_hci_err_to_str(err));
+		shell_error(sh, "Connection failed (err: %d)", err);
 		return -ENOEXEC;
 	}
 
@@ -358,7 +363,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	if (err) {
-		shell_error(shell, "connected(): Failed to connect to %s, reason: %d (%s)\n", addr, err,
+		shell_error(shell, "Failed to connect to %s, reason: %d (%s)\n", addr, err,
 			   bt_hci_err_to_str(err));
 		bt_conn_unref(default_conn);
 		default_conn = NULL;
@@ -389,7 +394,6 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	}
 
 	advertising_stop();
-
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -453,7 +457,7 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err err)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	shell_print(shell, "Pairing failed with %s, reason: %d (%s)", addr, err,
+	shell_error(shell, "Pairing failed with %s, reason: %d (%s)", addr, err,
 			security_err_str(err));
 }
 
@@ -546,14 +550,14 @@ static int cmd_pairing_delete(const struct shell *sh, size_t argc, char *argv[])
 	}
 
 	if (argc < 3) {
-		shell_print(sh, "Both address and address type needed");
+		shell_error(sh, "Both address and address type needed");
 		return -ENOEXEC;
 	} else {
 		err = bt_addr_le_from_str(argv[1], argv[2], &addr);
 	}
 
 	if (err) {
-		shell_print(sh, "Invalid address");
+		shell_error(sh, "Invalid address");
 		return err;
 	}
 
@@ -624,17 +628,7 @@ static void init_timer() {
 	NRF_TIMER3->TASKS_CLEAR = 1;
 	NRF_TIMER3->TASKS_START = 1;
 
-	#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP) || defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUNET)
-	NRF_TIMER1->TASKS_STOP = 1;
-	NRF_TIMER1->MODE = TIMER_MODE_MODE_Timer;
-	NRF_TIMER1->BITMODE = TIMER_BITMODE_BITMODE_32Bit;
-	NRF_TIMER1->PRESCALER = 4;   // 1 MHz → 1 tick = 1 µs
-
-	NRF_TIMER1->TASKS_CLEAR = 1;
-	NRF_TIMER1->TASKS_START = 1;
-
 	#elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
-
 	NRF_TIMER00->TASKS_STOP = 1;
 
 	NRF_TIMER00->MODE =
@@ -650,63 +644,6 @@ static void init_timer() {
 	#endif
 }
 
-/**
-* Define IPC for the two cores
-*/
-
-#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-/*
-static struct ipc_ept benchmark_ept;
-
-static K_SEM_DEFINE(benchmark_bound_sem, 0, 1);
-
-static void benchmark_ept_bound(void *priv)
-{
-	k_sem_give(&benchmark_bound_sem);
-}
-
-static struct ipc_ept_cfg benchmark_ept_cfg = {
-	.name = BENCHMARK_ENDPOINT_NAME,
-	.cb = {
-		.bound = benchmark_ept_bound,
-	},
-};
-
-
-int benchmark_ipc_init(void)
-{
-	const struct device *ipc_instance =
-		DEVICE_DT_GET(DT_NODELABEL(ipc0));
-
-	int err;
-
-	err = ipc_service_open_instance(ipc_instance);
-
-	if (err < 0 && err != -EALREADY) {
-		return err;
-	}
-
-	err = ipc_service_register_endpoint(
-		ipc_instance,
-		&benchmark_ept,
-		&benchmark_ept_cfg
-	);
-
-	if (err < 0) {
-		return err;
-	}
-
-	err = k_sem_take(&benchmark_bound_sem, K_SECONDS(2));
-
-	if (err) {
-		return -ETIMEDOUT;
-	}
-
-	return 0;
-}*/
-#endif
-
-
 static int cmd_init(const struct shell *sh)
 {
 	int err;
@@ -719,13 +656,13 @@ static int cmd_init(const struct shell *sh)
 	}
 	printf("Bluetooth initialized\n");
 
-	//#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-	//err = benchmark_ipc_init();
-	//if (err) {
-	//	printf("Benchmark IPC init failed: %d\n", err);
-	//	return err;
-	//}
-	//#endif
+	#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+	err = benchmark_ipc_init();
+	if (err) {
+		printf("Benchmark IPC init failed: %d\n", err);
+		return err;
+	}
+	#endif
 
 	err = settings_load();
 	if(err < 0){
@@ -769,7 +706,7 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 
 	const char *count = NULL;
 	int n = 1;             // arg 1: number of packets
-	payload_size_i = 1;    // arg 2: payload size, in bytes
+	int payload_size = 1;  // arg 2: payload size, in bytes (default 1)
 	char *endptr;
 
 	// I need at least one argument send_data
@@ -789,14 +726,11 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 			shell_error(sh, "Argument must be numeric.");
 			return -EINVAL;
 		}
-		if(n > 100) {
-			shell_error(sh, "Maximum amount of iterations is 100.");
-		}
 	}
 
 	// arg 2 (optional): payload size in bytes
 	if (argc > 2) {
-		payload_size_i = (int)strtol(argv[2], &endptr, 10);
+		payload_size = (int)strtol(argv[2], &endptr, 10);
 		if (*endptr != '\0') {
 			shell_error(sh, "payload_size must be numeric.");
 			return -EINVAL;
@@ -809,38 +743,50 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 		return -EINVAL;
 	}
 
-	// if n is > 0 -> packets can be sent
-	if (default_conn) {
-		for(int i=0; i<n; i++) {
+	// the measurement arrays only hold SUM_ARRAY_MAX_SIZE entries
+	if (n > 100) {
+		shell_error(sh, "Maximum amount of iterations is 100.");
+		return -EINVAL;
+	}
 
-			// wait (bounded) for the previous notification to finish
-			// notify_complete_cb() sets notification_sent = true on
-			// completion; the 1 s bound stops us hanging forever if a
-			// completion never arrives (e.g. the peer stops acknowledging).
-			int waited_ms = 0;
-			while (notification_sent == false && waited_ms < 1000) {
-				k_sleep(K_MSEC(1));
-				waited_ms++;
-			}
-
-			notification_sent = false; // this notification now in flight
-
-			const int err = send_notification(default_conn, &notification_srv.attrs[2], payload_size_i);
-			if(err) {
-				shell_error(sh, "Failed to send packet %d/%d. Reason: err=%d", i + 1, n, err);
-				notification_sent = true; // if nothing is in flight don't let it affect the next one
-				break;
-			}
-		}
-	} else {
+	if (!default_conn) {
 		shell_print(sh, "Not connected");
+		return -ENOTCONN;
+	}
+
+	// the controller filters the benchmarked packets by this payload size (+ 7 bytes header)
+	#if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+	payload_size_i = payload_size;
+	#elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
+	NRF5340_SHARED_VARIABLES->benchmark_control.payload_size = payload_size;
+	#endif
+
+	for (int i = 0; i < n; i++) {
+
+		// wait (bounded) for the previous notification to finish
+		// notify_complete_cb() sets notification_sent = true on
+		// completion; the 1 s bound stops us hanging forever if a
+		// completion never arrives (e.g. the peer stops acknowledging).
+		int waited_ms = 0;
+		while (notification_sent == false && waited_ms < 1000) {
+			k_sleep(K_MSEC(1));
+			waited_ms++;
+		}
+
+		notification_sent = false; // this notification now in flight
+
+		const int err = send_notification(default_conn, &notification_srv.attrs[2], payload_size);
+		if (err) {
+			shell_error(sh, "Failed to send packet %d/%d. Reason: err=%d (%s)", i + 1, n, err, strerror(-err));
+			notification_sent = true; // if nothing is in flight don't let it affect the next one
+			break;
+		}
+		shell_print(sh, "Packet #%d sent.", i + 1);
 	}
 
 	// leave the flag clean so the next send_data starts in a known state
 	notification_sent = true;
 
-	/* Set the measurement array(s) to zero */
-	// reset_measurements();
 	return 0;
 }
 
@@ -857,8 +803,6 @@ static int cmd_subscribe(const struct shell *sh, size_t argc, char *argv[])
 	int err = bt_gatt_subscribe(default_conn, &subscribe_params);
 	if (err) {
 		shell_error(sh,"Subscribe failed");
-	} else {
-		shell_print(sh,"Subscribing...\n");
 	}
 	return 0;
 }
@@ -965,6 +909,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD(discover, NULL, "Discovery of Services and Characteristics", cmd_service_and_characteristic_discovery),
 	SHELL_CMD(subscribe, NULL, "Subscription to a predefinec characteristic", cmd_subscribe),
 	SHELL_CMD(time_results, NULL, "Get the average time of keystream generation, encryption or decryption", cmd_get_time_results),
+	SHELL_CMD(time_results_extended, NULL, "Get the average time of keystream generation, encryption or decryption", cmd_get_time_results_extended),
 	SHELL_CMD(reset_values, NULL, "Reset benchmarking values, counters and arrays.", reset_values),
 	);
 

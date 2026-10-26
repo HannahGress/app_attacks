@@ -1,0 +1,41 @@
+/delete-node/ &sram0_shared;
+
+/ {
+	chosen {
+		/delete-property/ zephyr,ipc_shm;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		sram_ipc0: memory@20070000 {
+			reg = <0x20070000 0x8000>;
+		};
+
+		benchmark_shm: memory@20078000 {
+			reg = <0x20078000 0x8000>;
+		};
+	};
+
+	ipc {
+		/delete-node/ ipc0;
+
+		ipc0: ipc0 {
+			compatible = "zephyr,ipc-openamp-static-vrings";
+			memory-region = <&sram_ipc0>;
+
+			mboxes = <&mbox 0>, <&mbox 1>;
+			mbox-names = "tx", "rx";
+
+			role = "host";
+			status = "okay";
+
+			bt_hci_ipc0: bt_hci_ipc0 {
+				compatible = "zephyr,bt-hci-ipc";
+				status = "okay";
+			};
+		};
+	};
+};

@@ -7,11 +7,6 @@
 #include "zephyr/bluetooth/conn.h"
 #endif
 
-#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-#include <ipc_service.h>
-#include "zephyr/ipc/ipc_service.h"
-#endif
-
 #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
 #include <hal/nrf_radio.h>
 #include <hal/nrf_timer.h>
@@ -26,7 +21,6 @@
 /* The nRF54L15 spec does not mention KSGEN as part of the AES-CCm peripheral task */
 K_SEM_DEFINE(encryption_measurement_sem, 0, 1);
 volatile int payload_size_i = 0;
-volatile bool is_benchmarking = false;
 volatile struct benchmark_measurement encryption_measurement;
 volatile struct benchmark_measurement decryption_measurement;
 volatile struct benchmark_measurement encryption_measurements[SUM_ARRAY_MAX_SIZE];
@@ -39,7 +33,6 @@ volatile uint32_t decryption_measurement_count = 0;
 
 K_SEM_DEFINE(encryption_measurement_sem, 0, 1);
 volatile int payload_size_i = 0;
-volatile bool is_benchmarking = false;
 volatile struct benchmark_measurement encryption_measurement;
 volatile struct benchmark_measurement decryption_measurement;
 volatile struct benchmark_measurement encryption_measurements[SUM_ARRAY_MAX_SIZE];
@@ -47,7 +40,6 @@ volatile struct benchmark_measurement decryption_measurements[SUM_ARRAY_MAX_SIZE
 volatile uint32_t encryption_measurement_count = 0;
 volatile uint32_t decryption_measurement_count = 0;
 #endif
-
 
 /*
  * For benchmarking the nRF53840
@@ -185,44 +177,6 @@ void hal_radio_ccm_nRF52840_ppi_config() {
 }
 #endif
 
-
-#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
-
-static struct ipc_ept benchmark_ept;
-
-static int signal_cpunet(uint8_t command)
-{
-    int ret;
-
-    ret = ipc_service_send(
-        &benchmark_ept,
-        &command,
-        sizeof(command)
-    );
-
-    if (ret < 0) {
-        return ret;
-    }
-
-    if (ret != sizeof(command)) {
-        return -EIO;
-    }
-
-    return 0;
-}
-
-
-int send_signal_nRF5340_dppi_config() {
-    return signal_cpunet(BENCHMARK_CMD_DPPI_CONFIG);
-}
-
-int send_signal_nRF5340_dppi_disable() {
-    return signal_cpunet(BENCHMARK_CMD_DPPI_DISABLE);
-}
-#endif
-
-
-
 #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
 
 void hal_radio_ccm_nRF54L15_ppi_config(){
@@ -237,41 +191,14 @@ void hal_radio_ccm_nRF54L15_ppi_config(){
 
     /* DECRYPTION */
     /*
-     * RADIO EVENTS_PAYLOAD -> publish on DPPI channel HAL_TRIGGER_CRYPT_PPI
-     * Therefore, we can listen to this channel and don't need to configure our own publisher anc channel
-     * I addition, the RADIO and MCU reside in different DPPI domains, therefore, we need a PPI Bridge (PPIB)
-     * A PPIB channel can transfer messages between different domains by subscribing and publishing
-     * PPIB10 in RADIO PD is hardwired to PPIB00 in MCU PD (https://docs.nordicsemi.com/r/bundle/ps_nrf54l15/page/ppi.html)
-     */
+    * The Zephyr BLE controller already publishes RADIO EVENTS_PAYLOAD on DPPI channel 7
+    *  and bridges it to the MCU domain. Therefore, we can capture the channel in the MCU domain
+    */
 
-    /* Our PPIB channel subscribes to the HAL_TRIGGER_CRYPT_PPI */
-    nrf_ppib_subscribe_set(
-        NRF_PPIB10,
-        nrf_ppib_send_task_get(DECRYPT_START_PPIB_CHANNEL),
-    HAL_TRIGGER_CRYPT_PPI
-    );
-
-    /*
-     * MCU domain:
-     * The PPIB channel receives the data in the MCU domain and publishes it onto the DECRYPT_START_DPPI_CHANNEL
-     */
-    nrf_ppib_publish_set(
-        NRF_PPIB00,
-        nrf_ppib_receive_event_get(DECRYPT_START_PPIB_CHANNEL),
-        DECRYPT_START_DPPI_CHANNEL
-    );
-
-    /* The TIMER00 instance subscribes to the DECRYPT_START_DPPI_CHANNEL and saves the value into one of its register*/
     nrf_timer_subscribe_set(
         NRF_TIMER00,
         NRF_TIMER_TASK_CAPTURE1,
-        DECRYPT_START_DPPI_CHANNEL
-    );
-
-    /* Finally, we must activate our DECRYPT_START_DPPI_CHANNEL */
-    nrf_dppi_channels_enable(
-        NRF_DPPIC00,
-    BIT(DECRYPT_START_DPPI_CHANNEL)
+        HAL_TRIGGER_CRYPT_PPI
     );
 
 
@@ -302,14 +229,6 @@ void hal_radio_ccm_nRF54L15_ppi_disable(){
      * ENCRYPTION
      * We haven't defined any DPPI channels, so we don't need to disable any
      */
-
-    /* DECRYPTION */
-
-    /* Disable DPPI channel DECRYPT_START_DPPI_CHANNEL in DPPIC00 */
-    nrf_dppi_channels_disable(
-        NRF_DPPIC00,
-        BIT(DECRYPT_START_DPPI_CHANNEL)
-    );
 
     /* ENDCRYPTION */
 

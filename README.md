@@ -9,7 +9,6 @@ The attacks are:
 - [Key Negotiation Of Bluetooth (KNOB) Attack](https://dl.acm.org/doi/abs/10.1145/3394497)
 - [Nino Man-In-The-Middle Attack](https://ieeexplore.ieee.org/document/4401672?denied=)
 - Secure Connections Downgrade Attack
-- [Secure Connections Only mode Downgrade Attack](https://www.usenix.org/conference/usenixsecurity20/presentation/zhang-yue) (Central only)
 
 ### Commands
 At each use or reset, initialize the BLE module with `bleframework init`. To see the available commands, type `bleframework`.
@@ -125,9 +124,34 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
 14. To flash the built project to your DK or dongle, you can use [`west flash`](https://docs.zephyrproject.org/latest/develop/west/build-flash-debug.html#flashing-west-flash) or Nordic Semiconductor's [Programmer App](https://www.nordicsemi.com/Products/Development-tools/nRF-Programmer). The built .hex file is located under `app_attacks\cmake-build-debug\zephyr\zephyr.hex`
 15. If you want to add debugging, follow [these steps](https://docs.zephyrproject.org/latest/develop/tools/clion.html#configure-zephyr-parameters-for-debug)
 
+## Automation of benchmarking
+- Attach two boards
+- Optional: Attach a PPK II
+- Open cmd
+- Switch to `ble_framework attacks`
+- Activate the virtual environment (`.ble-venv\Scripts\activate.bat`)
+- `cd serial_interface`
+- `python serial_controller.py`
+- Follow the instructions on the terminal
+- 
+## [INFO ONLY] What's happening under the hood during benchmarking
 
-## Benchmarking
-1. set up a connection between the two devices
+| Device A                                                                | Device B                                                                            |
+|-------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
+| `bleframework init`                                                     | `bleframework init`                                                                 |
+|                                                                         | `bleframework advertise start`                                                      |
+| `bleframework scan start`                                               |                                                                                     |
+| // when device A is found <br> `bleframework scan stop`                 |                                                                                     |
+| `bleframework pair <BDA (public \| private)>`                           |                                                                                     |
+| // discover the characterisitc to subscribe <br>`bleframework discover` |                                                                                     |
+| // subscribe to it <br> `bleframework subscribe`                        |                                                                                     |
+| // optional: enable benchmarking <br> `bleframework benchmark on`       | // enable benchmarking <br> `bleframework benchmark on`                             |
+|                                                                         | `bleframework send_data <n> <payload size>`                                         |
+|                                                                         | // display benchmarking times of all n packets sent <br>`bleframework time_results` |
+
+
+# Troubleshooting
+- In case of any failure, reset the board(s). If this does not help. reflash the appropriate firmware.
 
 | Device A                                                                | Device B                                                                  |
 |-------------------------------------------------------------------------|---------------------------------------------------------------------------|
