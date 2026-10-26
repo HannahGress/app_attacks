@@ -169,11 +169,7 @@ static void scan_started(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 
 	/* connect only to devices in close proximity */
 	/* The nRF5340 needs a higher threshold to find devices being 7-10cm far away */
-	#if defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
 	if (rssi > -70) {
-	#elif defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
-	if (rssi > -70) {
-	#endif
 		bt_addr_le_to_str(addr, dev, sizeof(dev));
 		(void)memset(name, 0, sizeof(name));
 

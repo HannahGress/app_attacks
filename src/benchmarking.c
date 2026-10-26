@@ -20,6 +20,8 @@
 #include <nRF52_54_ppi_dppi.h>
 #endif
 
+void reset_values(void);
+
 static void benchmark_on() {
 
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
@@ -32,21 +34,21 @@ static void benchmark_on() {
         BIT(HAL_CRYPT_START_TIME_ENCRYPT_PPI) | BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI));
 
     /* reset all values to not disturb the measurements */
-    reset_values()
+    reset_values();
 
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
 
     send_signal_nRF5340_dppi_config();
 
     /* reset all values to not disturb the measurements */
-    reset_values()
+    reset_values();
 
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
 
     hal_radio_ccm_nRF54L15_ppi_config();
 
     /* reset all values to not disturb the measurements */
-    reset_values()
+    reset_values();
 
     #endif
 
@@ -319,7 +321,7 @@ int cmd_get_time_results_extended(const struct shell *sh, size_t argc, char *arg
     return 0;
 }
 
-void reset_values() {
+void reset_values(void) {
 #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
     encryption_measurement = (struct benchmark_measurement){0};
     decryption_measurement = (struct benchmark_measurement){0};

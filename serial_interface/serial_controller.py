@@ -62,8 +62,7 @@ def find_nordic_boards():
                         "port": port["comName"]
             })
             if device_family == "NRF53_FAMILY":
-            # https://nuttx.apache.org/docs/latest/platforms/arm/nrf53/boards/nrf5340-dk/index.html
-                if port.get("vcom") == 0:
+                if port.get("vcom") == 1:
                     boards.append({
                     "board": device_family,
                     "serial_number": serial_number,
@@ -90,7 +89,8 @@ def disconnect_system(serial_controller_c, serial_controller_p) -> None:
     Calls sys.exit()
     """
     serial_controller_c.write_with_response("bleframework unpair all", "central", 5.0)
-    serial_controller_c.write_with_response("bleframework unpair all", "peripheral", 5.0)
+    serial_controller_p.write_with_response("bleframework unpair all", "peripheral", 5.0)
+    time.sleep(3)
     serial_controller_c.disconnect()
     serial_controller_p.disconnect()
     print("[INFO]: Dont't forget to reset the boards before rerunning the script.\n"
@@ -238,7 +238,7 @@ class SerialController:
                 or ("advertise stop" in command and "Advertising successfully stopped" in line)
                 or ("scan stop" in command and "Scan successfully stopped" in line)
                 or ("discover" in command and "CCC handle" in line)
-                or ("unpair" in command and "Pairing successfully cleared" in line)):
+                or ("unpair" in command and "Pairings successfully cleared" in line)):
                     return True, "\n".join(response_lines)
 
                 if "subscribe" in command:
