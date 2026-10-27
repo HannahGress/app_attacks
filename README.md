@@ -152,4 +152,5 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
 
 # Troubleshooting
 - In case of any failure, reset the board(s). If this does not help. reflash the appropriate firmware.
+- If reflashing is not possible, you might recover the board. Open a command line terminal and type `nrfutil device list` to get all attached devices. You find the serial number of your broken device on the white sticker on your board (on the last line of the sticker). Then type `nrfutil device recover --serial-number <serial number>`. Your device is now ready for further operations, including flashing.
 
