@@ -2,7 +2,10 @@
 #include "zephyr/random/random.h"
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/util.h>
+ #include <zephyr/sys/byteorder.h>
+#include <stdio.h>
 #include <main.h>
+#include <gatt_communication.h>
 #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 #include <nRF52_54_ppi_dppi.h>
 #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
@@ -11,8 +14,15 @@
 #endif
 
 volatile bool notification_sent = true;
+volatile bool benchmark_quiet = false;
+static volatile bool results_sent = true;
 bool notify_enabled;
+bool results_notify_enabled;
 #define MAX_PAYLOAD_SIZE 244
+
+/* Device A: data notifications received since the last block summary (RES_END) */
+static uint16_t received_in_block;
+static struct bt_gatt_subscribe_params results_subscribe_params;
 
 /* own UUIDs */
 static struct bt_uuid_128 svc_uuid =
@@ -31,6 +41,15 @@ static struct bt_uuid_128 chrc_uuid =
         0x78, 0x56,
         0x34, 0x12, 0x78, 0x56, 0x34, 0x12);
 
+/* results characteristic: the DUT sends its measurement arrays to Device A over it */
+static struct bt_uuid_128 results_chrc_uuid =
+    BT_UUID_INIT_128(
+        0xf1, 0xde, 0xbc, 0x9a,
+        0x78, 0x56,
+        0x34, 0x12,
+        0x78, 0x56,
+        0x34, 0x12, 0x78, 0x56, 0x34, 0x12);
+
 /*
  * GATT Server
  */
@@ -40,7 +59,16 @@ static void ccc_notification_config_changed(const struct bt_gatt_attr *attr, uin
     notify_enabled = (value == BT_GATT_CCC_NOTIFY);
 }
 
-/* service + characteristic */
+static void ccc_results_config_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    results_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+}
+
+/* service + characteristics
+ * attrs[2] is the value of the data characteristic (send_data)
+ * attrs[5] is the value of the results characteristic
+ * Each CCC directly follows its value, Device A relies on that (ccc_handle = value_handle + 1)
+ */
 BT_GATT_SERVICE_DEFINE(notification_srv,
     BT_GATT_PRIMARY_SERVICE(&svc_uuid),
 
@@ -50,6 +78,14 @@ BT_GATT_SERVICE_DEFINE(notification_srv,
         NULL, NULL, NULL),
 
     BT_GATT_CCC(ccc_notification_config_changed,
+        BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+
+    BT_GATT_CHARACTERISTIC(&results_chrc_uuid.uuid,
+        BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_NONE,
+        NULL, NULL, NULL),
+
+    BT_GATT_CCC(ccc_results_config_changed,
         BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 );
 
@@ -70,6 +106,15 @@ static void notify_complete_cb(struct bt_conn *conn, void *user_data) {
     // get payload size from command line rather than a pointer to a stack variable
     // this way we can report which packet this is for
     int payload_size = POINTER_TO_INT(user_data);
+
+    // no shell output during a measurement (DUT auto run); the values stay in the arrays
+    if (benchmark_quiet) {
+        #if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
+        (void)k_sem_take(&encryption_measurement_sem, K_NO_WAIT);
+        #endif
+        notification_sent = true;
+        return;
+    }
 
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
     if (encryption_measurement_count == 0 ||
@@ -170,6 +215,43 @@ int send_notification(struct bt_conn *conn, const struct bt_gatt_attr *attr, int
     return bt_gatt_notify_cb(conn, &params);
 }
 
+static void results_complete_cb(struct bt_conn *conn, void *user_data)
+{
+    results_sent = true;
+}
+
+// sends one record over the results characteristic and waits (bounded) until it is on air
+int send_results(struct bt_conn *conn, const uint8_t *data, uint16_t len)
+{
+    if (!results_notify_enabled) {
+        shell_error(shell, "Results notifications not enabled");
+        return -EINVAL;
+    }
+
+    struct bt_gatt_notify_params params = {
+        .attr = &notification_srv.attrs[5],
+        .data = data,
+        .len = len,
+        .func = results_complete_cb,
+    };
+
+    results_sent = false;
+
+    int err = bt_gatt_notify_cb(conn, &params);
+    if (err) {
+        results_sent = true;
+        return err;
+    }
+
+    int waited_ms = 0;
+    while (results_sent == false && waited_ms < 1000) {
+        k_sleep(K_MSEC(1));
+        waited_ms++;
+    }
+
+    return 0;
+}
+
 
 /*
  * GATT Client
@@ -183,6 +265,14 @@ static uint8_t notification_cb(struct bt_conn *conn,
         shell_print(shell, "Unsubscribed\n");
         params->value_handle = 0;
         return BT_GATT_ITER_STOP;
+    }
+
+    received_in_block++;
+
+    // autonomous DUT run (results characteristic subscribed): only count, no output per packet.
+    // Printing ~7 lines per packet blocks A's BT RX thread, A stops acknowledging and B has to retransmit.
+    if (results_subscribe_params.value_handle) {
+        return BT_GATT_ITER_CONTINUE;
     }
 
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
@@ -243,11 +333,106 @@ static uint8_t notification_cb(struct bt_conn *conn,
     return BT_GATT_ITER_CONTINUE;
 }
 
+/*
+ * Device A receives the DUT's measurement arrays and prints them as text lines,
+ * serial_controller.py turns them into a CSV:
+ *   RES_BEGIN,<payload_size>,<packets_sent>,<count>,<fields_per_record>,<timer_hz>
+ *   RES,<payload_size>,<index>,<tick>,...
+ *   RES_END,<payload_size>
+ *   RES_BATCH_DONE
+ */
+static uint8_t results_fields_per_record;
+static uint16_t block_sent, block_measured;  // from the DUT's RES_BEGIN, for the block summary
+
+static uint8_t results_notification_cb(struct bt_conn *conn,
+                          struct bt_gatt_subscribe_params *params,
+                          const void *data, uint16_t length)
+{
+    if (!data) {
+        params->value_handle = 0;
+        return BT_GATT_ITER_STOP;
+    }
+
+    const uint8_t *rec = data;
+
+    if (length < 1) {
+        return BT_GATT_ITER_CONTINUE;
+    }
+
+    switch (rec[0]) {
+    case RESULTS_BEGIN:
+        if (length < RESULTS_BEGIN_LEN) {
+            break;
+        }
+        results_fields_per_record = rec[6];
+        block_sent = sys_get_le16(&rec[2]);
+        block_measured = sys_get_le16(&rec[4]);
+        shell_print(shell, "RES_BEGIN,%u,%u,%u,%u,%u", rec[1], sys_get_le16(&rec[2]),
+                    sys_get_le16(&rec[4]), rec[6], sys_get_le32(&rec[7]));
+        break;
+
+    case RESULTS_DATA: {
+        if (length < RESULTS_DATA_HEADER_LEN || results_fields_per_record == 0) {
+            break;
+        }
+        uint16_t first_index = sys_get_le16(&rec[2]);
+        uint8_t n_records = rec[4];
+
+        if (length < RESULTS_DATA_HEADER_LEN + n_records * results_fields_per_record * 4) {
+            shell_error(shell, "RES_ERROR,truncated record");
+            break;
+        }
+
+        const uint8_t *value = &rec[RESULTS_DATA_HEADER_LEN];
+        for (int r = 0; r < n_records; r++) {
+            char line[128];
+            int pos = snprintf(line, sizeof(line), "RES,%u,%u", rec[1], first_index + r);
+
+            for (int f = 0; f < results_fields_per_record; f++) {
+                pos += snprintf(&line[pos], sizeof(line) - pos, ",%u", sys_get_le32(value));
+                value += 4;
+            }
+            shell_print(shell, "%s", line);
+        }
+        break;
+    }
+
+    case RESULTS_END:
+        shell_print(shell, "RES_END,%u", length > 1 ? rec[1] : 0);
+        shell_print(shell, "Summary: %u x %u-byte packets received (B sent %u, measured %u)",
+                    received_in_block, length > 1 ? rec[1] : 0, block_sent, block_measured);
+        received_in_block = 0;
+        break;
+
+    case RESULTS_BATCH_DONE:
+        shell_print(shell, "RES_BATCH_DONE");
+        break;
+
+    default:
+        break;
+    }
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
 static void subscribe_cb(struct bt_conn *conn, uint8_t err,
                          struct bt_gatt_subscribe_params *params)
 {
     if (err != 0) {
         shell_error(shell, "Subscribe failed");
+    } else if (results_subscribe_params.value_handle) {
+        // the results subscription follows, it prints "Subscribed" when both are done
+        shell_print(shell, "Data notifications subscribed");
+    } else {
+        shell_print(shell, "Subscribed\n");
+    }
+}
+
+static void results_subscribe_cb(struct bt_conn *conn, uint8_t err,
+                         struct bt_gatt_subscribe_params *params)
+{
+    if (err != 0) {
+        shell_error(shell, "Subscribe failed (results)");
     } else {
         shell_print(shell, "Subscribed\n");
     }
@@ -259,16 +444,45 @@ struct bt_gatt_subscribe_params subscribe_params = {
     .value = BT_GATT_CCC_NOTIFY,
 };
 
+static struct bt_gatt_subscribe_params results_subscribe_params = {
+    .notify = results_notification_cb,
+    .subscribe = results_subscribe_cb,
+    .value = BT_GATT_CCC_NOTIFY,
+};
+
+// subscribes to the data characteristic and, if the peer has one, to the results characteristic
+int subscribe_all(struct bt_conn *conn)
+{
+    // a new run starts with an empty block count
+    received_in_block = 0;
+
+    int err = bt_gatt_subscribe(conn, &subscribe_params);
+    if (err) {
+        return err;
+    }
+
+    if (results_subscribe_params.value_handle) {
+        err = bt_gatt_subscribe(conn, &results_subscribe_params);
+    }
+
+    return err;
+}
+
 static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
                  const struct bt_gatt_attr *attr,
                  struct bt_gatt_discover_params *params)
 {
     if (!attr) {
+        // printed only now, so the script does not subscribe before both characteristics are known
+        if (subscribe_params.ccc_handle) {
+            shell_print(shell, "CCC handle: 0x%04x", subscribe_params.ccc_handle);
+        }
+        if (results_subscribe_params.ccc_handle) {
+            shell_print(shell, "Results CCC handle: 0x%04x", results_subscribe_params.ccc_handle);
+        }
         shell_print(shell, "Discovery done");
         return BT_GATT_ITER_STOP;
     }
-
-    uint16_t value_handle = 0;
 
     if (params->type == BT_GATT_DISCOVER_PRIMARY) {
         const struct bt_gatt_service_val *service_attribute_value = attr->user_data;
@@ -285,19 +499,16 @@ static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
 
     if (params->type == BT_GATT_DISCOVER_CHARACTERISTIC) {
         const struct bt_gatt_chrc *characteristic = attr->user_data;
-        value_handle = characteristic->value_handle;
-        subscribe_params.value_handle = value_handle;
-        shell_print(shell, "Value handle: 0x%04x", characteristic->value_handle);
-    }
 
-    // change params for ccc discovery
-    params->type = BT_GATT_DISCOVER_DESCRIPTOR;
-    params->start_handle = value_handle + 1;
-
-    if (params->type == BT_GATT_DISCOVER_DESCRIPTOR) {
-        if (!bt_uuid_cmp(attr->uuid, BT_UUID_GATT_CCC)) {
-            subscribe_params.ccc_handle = attr->handle;
-            shell_print(shell, "CCC handle: 0x%04x", attr->handle);
+        // our service layout is fixed (BT_GATT_SERVICE_DEFINE above): each CCC directly follows its value
+        if (!bt_uuid_cmp(characteristic->uuid, &chrc_uuid.uuid)) {
+            subscribe_params.value_handle = characteristic->value_handle;
+            subscribe_params.ccc_handle = characteristic->value_handle + 1;
+            shell_print(shell, "Value handle: 0x%04x", characteristic->value_handle);
+        } else if (!bt_uuid_cmp(characteristic->uuid, &results_chrc_uuid.uuid)) {
+            results_subscribe_params.value_handle = characteristic->value_handle;
+            results_subscribe_params.ccc_handle = characteristic->value_handle + 1;
+            shell_print(shell, "Results value handle: 0x%04x", characteristic->value_handle);
         }
     }
 
@@ -305,9 +516,21 @@ static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
 }
 
 struct bt_gatt_discover_params discover_params = {
-    .uuid = &svc_uuid.uuid, // only the already declared Service will be discovered
     .func = service_and_characteristics_discovery,
-    .start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE,
-    .end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE,
-    .type = BT_GATT_DISCOVER_PRIMARY,
 };
+
+int start_discovery(struct bt_conn *conn)
+{
+    // discover_params is modified during the discovery, so start from scratch every time
+    discover_params.uuid = &svc_uuid.uuid; // only the already declared Service will be discovered
+    discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
+    discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
+    discover_params.type = BT_GATT_DISCOVER_PRIMARY;
+
+    subscribe_params.value_handle = 0;
+    subscribe_params.ccc_handle = 0;
+    results_subscribe_params.value_handle = 0;
+    results_subscribe_params.ccc_handle = 0;
+
+    return bt_gatt_discover(conn, &discover_params);
+}

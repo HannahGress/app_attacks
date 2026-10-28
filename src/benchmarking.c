@@ -2,6 +2,7 @@
 #include <benchmarking.h>
 #include <stdlib.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/sys/util.h>
 
 #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 #include <nRF52_54_ppi_dppi.h>
@@ -21,7 +22,7 @@
 #include <nRF52_54_ppi_dppi.h>
 #endif
 
-static void benchmark_on() {
+void benchmark_on(void) {
 
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 
@@ -55,7 +56,7 @@ static void benchmark_on() {
     shell_print(shell, "Benchmarking successfully enabled.");
 }
 
-static void benchmark_off() {
+void benchmark_off(void) {
 
     #if defined(CONFIG_SOC_COMPATIBLE_NRF52X)
     nrf_ppi_channels_disable(NRF_PPI,
@@ -118,13 +119,13 @@ int cmd_get_time_results(const struct shell *sh, size_t argc, char *argv[]) {
     int i = 0;
     int j = 0;
 
-    while(i < length_values_ENCRYPT && encryption_measurements[i].delta_ENDCRYPT != 0) {
+    while(i < MIN(encryption_measurement_count, length_values_ENCRYPT)) {
         sum_KSGEN_ENCRYPT += encryption_measurements[i].delta_KSGEN * TIMER_TICK_NS;
         sum_ENCRYPT += encryption_measurements[i].delta_ENDCRYPT * TIMER_TICK_NS;
         i++;
     }
 
-    while(j < length_values_DECRYPT && decryption_measurements[j].delta_ENDCRYPT != 0) {
+    while(j < MIN(decryption_measurement_count, length_values_DECRYPT)) {
         sum_KSGEN_DECRYPT += decryption_measurements[j].delta_KSGEN * TIMER_TICK_NS;
         sum_DECRYPT += decryption_measurements[j].delta_ENDCRYPT * TIMER_TICK_NS;
         j++;
@@ -161,13 +162,13 @@ int cmd_get_time_results(const struct shell *sh, size_t argc, char *argv[]) {
     int i = 0;
     int j = 0;
 
-    while(i < length_values_ENCRYPT && NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[i].delta_ENDCRYPT != 0) {
+    while(i < MIN(NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurement_count, length_values_ENCRYPT)) {
         sum_KSGEN_ENCRYPT += NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[i].delta_KSGEN * TIMER_TICK_NS;
         sum_ENCRYPT += NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[i].delta_ENDCRYPT * TIMER_TICK_NS;
         i++;
     }
 
-    while(j < length_values_DECRYPT && NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurements[j].delta_ENDCRYPT != 0) {
+    while(j < MIN(NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurement_count, length_values_DECRYPT)) {
         sum_KSGEN_DECRYPT += NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurements[j].delta_KSGEN * TIMER_TICK_NS;
         sum_DECRYPT += NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurements[j].delta_ENDCRYPT * TIMER_TICK_NS;
         j++;
@@ -202,12 +203,12 @@ int cmd_get_time_results(const struct shell *sh, size_t argc, char *argv[]) {
     int i = 0;
     int j = 0;
 
-    while(i < length_values_ENCRYPT && encryption_measurements[i].delta_ENDCRYPT != 0) {
+    while(i < MIN(encryption_measurement_count, length_values_ENCRYPT)) {
         sum_ENCRYPT += encryption_measurements[i].delta_ENDCRYPT * TIMER_TICK_NS;
         i++;
     }
 
-    while(j < length_values_DECRYPT && decryption_measurements[j].delta_ENDCRYPT != 0) {
+    while(j < MIN(decryption_measurement_count, length_values_DECRYPT)) {
         sum_DECRYPT += decryption_measurements[j].delta_ENDCRYPT * TIMER_TICK_NS;
         j++;
     }
@@ -241,7 +242,7 @@ int cmd_get_time_results_extended(const struct shell *sh, size_t argc, char *arg
     int i = 0;
     int j = 0;
 
-    while(i < length_values_ENCRYPT && encryption_measurements[i].delta_ENDCRYPT != 0) {
+    while(i < MIN(encryption_measurement_count, length_values_ENCRYPT)) {
         shell_print(sh, "Iteration %u: \n", i);
         shell_print(sh, "start_KSGEN %f: ns\n", encryption_measurements[i].t_start_KSGEN * TIMER_TICK_NS);
         shell_print(sh, "end_KSGEN %f: ns\n", encryption_measurements[i].t_end_KSGEN * TIMER_TICK_NS);
@@ -252,7 +253,7 @@ int cmd_get_time_results_extended(const struct shell *sh, size_t argc, char *arg
         i ++;
     }
 
-    while(j < length_values_DECRYPT && decryption_measurements[j].delta_ENDCRYPT != 0) {
+    while(j < MIN(decryption_measurement_count, length_values_DECRYPT)) {
         shell_print(sh, "Iteration %u: \n", j);
         shell_print(sh, "start_KSGEN %f: ns\n", decryption_measurements[j].t_start_KSGEN * TIMER_TICK_NS);
         shell_print(sh, "end_KSGEN %f: ns\n", decryption_measurements[j].t_end_KSGEN * TIMER_TICK_NS);
@@ -272,7 +273,7 @@ int cmd_get_time_results_extended(const struct shell *sh, size_t argc, char *arg
     int i = 0;
     int j = 0;
 
-    while(i < length_values_ENCRYPT && NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[i].delta_ENDCRYPT != 0) {
+    while(i < MIN(NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurement_count, length_values_ENCRYPT)) {
         shell_print(sh, "Iteration %u: \n", i);
         shell_print(sh, "start_KSGEN %f: ns\n", NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[i].t_start_KSGEN * TIMER_TICK_NS);
         shell_print(sh, "end_KSGEN %f: ns\n", NRF5340_SHARED_VARIABLES->benchmark_results.encryption_measurements[i].t_end_KSGEN * TIMER_TICK_NS);
@@ -283,7 +284,7 @@ int cmd_get_time_results_extended(const struct shell *sh, size_t argc, char *arg
         i ++;
     }
 
-    while(j < length_values_DECRYPT && NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurements[j].delta_ENDCRYPT != 0) {
+    while(j < MIN(NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurement_count, length_values_DECRYPT)) {
         shell_print(sh, "Iteration %u: \n", j);
         shell_print(sh, "start_KSGEN %f: ns\n", NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurements[j].t_start_KSGEN * TIMER_TICK_NS);
         shell_print(sh, "end_KSGEN %f: ns\n", NRF5340_SHARED_VARIABLES->benchmark_results.decryption_measurements[j].t_end_KSGEN * TIMER_TICK_NS);
@@ -303,7 +304,7 @@ int cmd_get_time_results_extended(const struct shell *sh, size_t argc, char *arg
     int i = 0;
     int j = 0;
 
-    while(i < length_values_ENCRYPT && encryption_measurements[i].delta_ENDCRYPT != 0) {
+    while(i < MIN(encryption_measurement_count, length_values_ENCRYPT)) {
         shell_print(sh, "Iteration %u: \n", i);
         shell_print(sh, "start_ENCRYPT %f: ns\n", encryption_measurements[i].t_start_ENDCRYPT * TIMER_TICK_NS);
         shell_print(sh, "end_ENCRYPT %f: ns\n", encryption_measurements[i].t_end_ENDCRYPT * TIMER_TICK_NS);
@@ -311,7 +312,7 @@ int cmd_get_time_results_extended(const struct shell *sh, size_t argc, char *arg
         i ++;
     }
 
-    while(j < length_values_DECRYPT && decryption_measurements[j].delta_ENDCRYPT != 0) {
+    while(j < MIN(decryption_measurement_count, length_values_DECRYPT)) {
         shell_print(sh, "Iteration %u: \n", j);
         shell_print(sh, "start_DECRYPT %f: ns\n", decryption_measurements[j].t_start_ENDCRYPT * TIMER_TICK_NS);
         shell_print(sh, "end_DECRYPT %f: ns\n", decryption_measurements[j].t_end_ENDCRYPT * TIMER_TICK_NS);

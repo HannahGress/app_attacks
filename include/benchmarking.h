@@ -6,3 +6,5 @@ extern int cmd_get_delta_encryption_time();
 extern int cmd_get_time_results();
 extern int cmd_get_time_results_extended();
 extern void reset_values();
+extern void benchmark_on(void);
+extern void benchmark_off(void);

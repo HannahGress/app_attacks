@@ -26,9 +26,16 @@
 #include <zephyr/settings/settings.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
+#if defined(CONFIG_SHELL_BACKEND_DUMMY)
+#include <zephyr/shell/shell_dummy.h>
+#else
+#include <zephyr/shell/shell_uart.h>
+#endif
 #include <ifa.h>
+#include <main.h>
 #include <gatt_communication.h>
 #include <benchmarking.h>
+#include <auto_benchmark.h>
 #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX) || defined(CONFIG_SOC_COMPATIBLE_NRF52X)
 #include "../include/nRF52_54_ppi_dppi.h"
 #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP)
@@ -299,8 +306,17 @@ static int cmd_connect(const struct shell *sh, size_t argc, char *argv[])
 					BT_GAP_SCAN_FAST_INTERVAL,
 					BT_GAP_SCAN_FAST_INTERVAL);
 
-	err = bt_conn_le_create(&addr, create_params, BT_LE_CONN_PARAM_DEFAULT, &conn);
+	// same connection parameters the Peripheral prefers (prj.conf), so nobody requests a change later
+	err = bt_conn_le_create(&addr, create_params,
+				BT_LE_CONN_PARAM(CONFIG_BT_PERIPHERAL_PREF_MIN_INT, CONFIG_BT_PERIPHERAL_PREF_MAX_INT,
+						 CONFIG_BT_PERIPHERAL_PREF_LATENCY, CONFIG_BT_PERIPHERAL_PREF_TIMEOUT),
+				&conn);
 
+	// -EAGAIN: the host refuses to connect while our own scan is running (or before "bleframework init")
+	if (err == -EAGAIN) {
+		shell_error(sh, "Connection failed: scanning is still running. Please stop scanning first with 'bleframework scan stop'.");
+		return -ENOEXEC;
+	}
 	if (err) {
 		shell_error(sh, "Connection failed (err: %d)", err);
 		return -ENOEXEC;
@@ -591,7 +607,11 @@ static int cmd_security(const struct shell *sh)
 }
 
 static int cmd_pair(const struct shell *sh, size_t argc, char *argv[]){
-	cmd_connect(sh, argc, argv);
+	// no connection, nothing to secure (skips the follow-up "Not connected" error)
+	int err = cmd_connect(sh, argc, argv);
+	if (err) {
+		return err;
+	}
 	k_sleep(K_SECONDS(2));
 	cmd_security(sh);
 	return 0;
@@ -646,8 +666,15 @@ static void init_timer() {
 
 static int cmd_init(const struct shell *sh)
 {
-	int err;
 	shell = sh;
+
+	return ble_init();
+}
+
+// used by "bleframework init" and by the DUT auto run (auto_benchmark.c)
+int ble_init(void)
+{
+	int err;
 
 	err = bt_enable(NULL);
 	if (err) {
@@ -754,6 +781,33 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 		return -ENOTCONN;
 	}
 
+	send_packets(n, payload_size, false);
+
+	return 0;
+}
+
+// wait (bounded) for the previous notification to finish
+// notify_complete_cb() sets notification_sent = true on
+// completion; the 1 s bound stops us hanging forever if a
+// completion never arrives (e.g. the peer stops acknowledging).
+static void wait_notification_sent(void)
+{
+	int waited_ms = 0;
+	while (notification_sent == false && waited_ms < 1000) {
+		k_sleep(K_MSEC(1));
+		waited_ms++;
+	}
+}
+
+// used by "bleframework send_data" and by the DUT auto run (quiet: no shell output per packet)
+int send_packets(int n, int payload_size, bool quiet)
+{
+	int err = 0;
+
+	if (!default_conn) {
+		return -ENOTCONN;
+	}
+
 	// the controller filters the benchmarked packets by this payload size (+ 7 bytes header)
 	#if defined(CONFIG_SOC_COMPATIBLE_NRF52X) || defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
 	payload_size_i = payload_size;
@@ -761,37 +815,37 @@ static int cmd_send_data(const struct shell *sh, size_t argc, char *argv[])
 	NRF5340_SHARED_VARIABLES->benchmark_control.payload_size = payload_size;
 	#endif
 
+	benchmark_quiet = quiet;
+
 	for (int i = 0; i < n; i++) {
 
-		// wait (bounded) for the previous notification to finish
-		// notify_complete_cb() sets notification_sent = true on
-		// completion; the 1 s bound stops us hanging forever if a
-		// completion never arrives (e.g. the peer stops acknowledging).
-		int waited_ms = 0;
-		while (notification_sent == false && waited_ms < 1000) {
-			k_sleep(K_MSEC(1));
-			waited_ms++;
-		}
+		wait_notification_sent();
 
 		notification_sent = false; // this notification now in flight
 
-		const int err = send_notification(default_conn, &notification_srv.attrs[2], payload_size);
+		err = send_notification(default_conn, &notification_srv.attrs[2], payload_size);
 		if (err) {
-			shell_error(sh, "Failed to send packet %d/%d. Reason: err=%d (%s)", i + 1, n, err, strerror(-err));
+			shell_error(shell, "Failed to send packet %d/%d. Reason: err=%d (%s)", i + 1, n, err, strerror(-err));
 			notification_sent = true; // if nothing is in flight don't let it affect the next one
 			break;
 		}
-		shell_print(sh, "Packet #%d sent.", i + 1);
+		if (!quiet) {
+			shell_print(shell, "Packet #%d sent.", i + 1);
+		}
 	}
+
+	// the last notification must be on air before the quiet window ends
+	wait_notification_sent();
+	benchmark_quiet = false;
 
 	// leave the flag clean so the next send_data starts in a known state
 	notification_sent = true;
 
-	return 0;
+	return err;
 }
 
 static int cmd_service_and_characteristic_discovery(const struct shell *sh, size_t argc, char *argv[]) {
-	int err = bt_gatt_discover(default_conn, &discover_params);
+	int err = start_discovery(default_conn);
 	if (err) {
 		shell_error(sh,"Service and Characteristic discovery failed (err %d)\n", err);
 	}
@@ -800,7 +854,7 @@ static int cmd_service_and_characteristic_discovery(const struct shell *sh, size
 
 static int cmd_subscribe(const struct shell *sh, size_t argc, char *argv[])
 {
-	int err = bt_gatt_subscribe(default_conn, &subscribe_params);
+	int err = subscribe_all(default_conn);
 	if (err) {
 		shell_error(sh,"Subscribe failed");
 	}
@@ -858,6 +912,18 @@ static int cmd_scda(const struct shell *sh, size_t argc, char *argv[])
 int main(void)
 {
 	printf("BLE Testing Framework %s\n", CONFIG_BOARD_TARGET);
+
+#if defined(CONFIG_BENCHMARK_AUTO_DUT)
+	// nobody types "bleframework init" on the DUT, so the shell pointer used by
+	// every shell_print must be set here (it is NULL otherwise)
+#if defined(CONFIG_SHELL_BACKEND_DUMMY)
+	// /!\ serial shell disabled in auto_dut.conf: all output goes nowhere, see there to reactivate it
+	shell = shell_backend_dummy_get_ptr();
+#else
+	shell = shell_backend_uart_get_ptr();
+#endif
+	auto_benchmark_run();
+#endif
 
 	return 0;
 }
