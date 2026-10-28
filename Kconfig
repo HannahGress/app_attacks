@@ -1,0 +1,10 @@
+config BENCHMARK_AUTO_DUT
+	bool "Run the benchmark batch autonomously after boot (Device B / DUT on PPK II)"
+	help
+	  The DUT initializes, advertises, accepts the pairing of Device A and,
+	  once Device A has subscribed, sends all payload sizes from
+	  auto_benchmark.c on its own. The results are sent to Device A over the
+	  results characteristic, so the DUT's serial terminal is never needed.
+	  Build with -DEXTRA_CONF_FILE=auto_dut.conf.
+
+source "Kconfig.zephyr"
