@@ -139,7 +139,7 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
 | Device A                                                                | Device B                                                                            |
 |-------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
 | `bleframework init`                                                     | `bleframework init`                                                                 |
-|                                                                         | `bleframework advertise start`                                                      |
+| `bleframework unpair all`                                               | `bleframework advertise start`                                                      |
 | `bleframework scan start`                                               |                                                                                     |
 | // when device A is found <br> `bleframework scan stop`                 |                                                                                     |
 | `bleframework pair <BDA (public \| random)>`                            |                                                                                     |
