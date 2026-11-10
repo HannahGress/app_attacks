@@ -32,3 +32,18 @@ extern struct bt_gatt_discover_params discover_params;
 
 #define RESULTS_BEGIN_LEN       11
 #define RESULTS_DATA_HEADER_LEN 5
+
+/*
+ * Record on the control characteristic (Device A -> DUT), little endian.
+ *   RUN: type, payload_size, packets (u16)
+ */
+#define CONTROL_RUN     1
+#define CONTROL_RUN_LEN 4
+
+// Device A: write a RUN record to the DUT
+extern int request_run(struct bt_conn *conn, uint8_t payload_size, uint16_t packets);
+
+// DUT: the latest RUN request, given via run_request_sem
+extern struct k_sem run_request_sem;
+extern volatile uint8_t run_request_payload_size;
+extern volatile uint16_t run_request_packets;

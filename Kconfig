@@ -7,4 +7,12 @@ config BENCHMARK_AUTO_DUT
 	  results characteristic, so the DUT's serial terminal is never needed.
 	  Build with -DEXTRA_CONF_FILE=auto_dut.conf.
 
+config BENCHMARK_IDLE_TEST
+	bool "Idle current test: step through sleep / timer / BLE phases (Device B on PPK II)"
+	depends on !BENCHMARK_AUTO_DUT && SOC_COMPATIBLE_NRF52X
+	help
+	  Measures what the benchmark timer and Bluetooth add to the idle current.
+	  See src/idle_test.c, evaluate with data_processing/idle_test.py.
+	  Build with -DEXTRA_CONF_FILE=idle_test.conf.
+
 source "Kconfig.zephyr"

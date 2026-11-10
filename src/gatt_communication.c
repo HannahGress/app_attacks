@@ -1,3 +1,4 @@
+#include <zephyr/kernel.h>
 #include "zephyr/bluetooth/gatt.h"
 #include "zephyr/random/random.h"
 #include <zephyr/shell/shell.h>
@@ -50,6 +51,23 @@ static struct bt_uuid_128 results_chrc_uuid =
         0x78, 0x56,
         0x34, 0x12, 0x78, 0x56, 0x34, 0x12);
 
+/* control characteristic: Device A tells the DUT which payload size to measure next */
+static struct bt_uuid_128 control_chrc_uuid =
+    BT_UUID_INIT_128(
+        0xf2, 0xde, 0xbc, 0x9a,
+        0x78, 0x56,
+        0x34, 0x12,
+        0x78, 0x56,
+        0x34, 0x12, 0x78, 0x56, 0x34, 0x12);
+
+/* DUT: the last valid run request, auto_benchmark_run() waits on run_request_sem */
+K_SEM_DEFINE(run_request_sem, 0, 1);
+volatile uint8_t run_request_payload_size;
+volatile uint16_t run_request_packets;
+
+/* Device A: value handle of the DUT's control characteristic (0 = not discovered) */
+static uint16_t control_value_handle;
+
 /*
  * GATT Server
  */
@@ -64,9 +82,35 @@ static void ccc_results_config_changed(const struct bt_gatt_attr *attr, uint16_t
     results_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
 }
 
+// DUT: a CONTROL_RUN record from Device A, see gatt_communication.h
+static ssize_t control_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                             const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    const uint8_t *rec = buf;
+
+    if (offset != 0 || len != CONTROL_RUN_LEN) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    uint8_t payload_size = rec[1];
+    uint16_t packets = sys_get_le16(&rec[2]);
+
+    if (rec[0] != CONTROL_RUN || payload_size < 1 || payload_size > MAX_PAYLOAD_SIZE ||
+        packets < 1 || packets > SUM_ARRAY_MAX_SIZE) {
+        return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
+    }
+
+    run_request_payload_size = payload_size;
+    run_request_packets = packets;
+    k_sem_give(&run_request_sem);
+
+    return len;
+}
+
 /* service + characteristics
  * attrs[2] is the value of the data characteristic (send_data)
  * attrs[5] is the value of the results characteristic
+ * attrs[8] is the value of the control characteristic
  * Each CCC directly follows its value, Device A relies on that (ccc_handle = value_handle + 1)
  */
 BT_GATT_SERVICE_DEFINE(notification_srv,
@@ -87,6 +131,11 @@ BT_GATT_SERVICE_DEFINE(notification_srv,
 
     BT_GATT_CCC(ccc_results_config_changed,
         BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+
+    BT_GATT_CHARACTERISTIC(&control_chrc_uuid.uuid,
+        BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+        BT_GATT_PERM_WRITE,
+        NULL, control_write, NULL),
 );
 
 /*
@@ -509,6 +558,9 @@ static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
             results_subscribe_params.value_handle = characteristic->value_handle;
             results_subscribe_params.ccc_handle = characteristic->value_handle + 1;
             shell_print(shell, "Results value handle: 0x%04x", characteristic->value_handle);
+        } else if (!bt_uuid_cmp(characteristic->uuid, &control_chrc_uuid.uuid)) {
+            control_value_handle = characteristic->value_handle;
+            shell_print(shell, "Control value handle: 0x%04x", characteristic->value_handle);
         }
     }
 
@@ -531,6 +583,23 @@ int start_discovery(struct bt_conn *conn)
     subscribe_params.ccc_handle = 0;
     results_subscribe_params.value_handle = 0;
     results_subscribe_params.ccc_handle = 0;
+    control_value_handle = 0;
 
     return bt_gatt_discover(conn, &discover_params);
+}
+
+// Device A: asks the DUT to measure one payload size, the results follow as RES lines
+int request_run(struct bt_conn *conn, uint8_t payload_size, uint16_t packets)
+{
+    uint8_t rec[CONTROL_RUN_LEN];
+
+    if (!control_value_handle) {
+        return -ENOENT;
+    }
+
+    rec[0] = CONTROL_RUN;
+    rec[1] = payload_size;
+    sys_put_le16(packets, &rec[2]);
+
+    return bt_gatt_write_without_response(conn, control_value_handle, rec, sizeof(rec), false);
 }

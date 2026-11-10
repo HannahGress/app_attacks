@@ -3,7 +3,8 @@
  * without USB/serial terminal (build with -DEXTRA_CONF_FILE=auto_dut.conf).
  * Same steps as the "under the hood" table in the README:
  *   init -> advertise start -> (Device A pairs, discovers, subscribes)
- *   per payload size: benchmark on -> idle gap -> n packets -> idle gap -> benchmark off -> results to Device A
+ *   per "bleframework run <payload_size> [n]" on Device A (control characteristic):
+ *   benchmark on -> idle gap -> n packets -> idle gap -> benchmark off -> results to Device A
  */
 
 #include <zephyr/kernel.h>
@@ -26,14 +27,9 @@
 
 #if defined(CONFIG_BENCHMARK_AUTO_DUT)
 
-/* the batch: every payload size is sent PACKETS_PER_PAYLOAD times */
-static const uint8_t payload_sizes[] = {1, 20, 50, 100, 150, 200, 244};
-#define PACKETS_PER_PAYLOAD 100  /* max. SUM_ARRAY_MAX_SIZE */
 #define BOOT_DELAY_MS 2000
-/* quiet time before and after each block, it separates the blocks in the PPK II trace */
-#define IDLE_GAP_MS 1000
-
-BUILD_ASSERT(PACKETS_PER_PAYLOAD <= SUM_ARRAY_MAX_SIZE, "the measurement arrays are too small");
+/* quiet time before and after each block, gives every PPK II recording a clean baseline */
+#define IDLE_GAP_MS 500
 
 /* raw timer ticks per record; the nRF54L CCM has no separate KSGEN step */
 #if defined(CONFIG_SOC_COMPATIBLE_NRF54LX)
@@ -172,35 +168,33 @@ void auto_benchmark_run(void)
 		k_sleep(K_MSEC(100));
 	}
 
-	shell_print(shell, "[AUTO] Device A ready, starting the batch (%d payload sizes x %d packets)",
-		    (int)ARRAY_SIZE(payload_sizes), PACKETS_PER_PAYLOAD);
+	shell_print(shell, "[AUTO] Device A ready, waiting for run requests");
 
-	for (int p = 0; p < ARRAY_SIZE(payload_sizes); p++) {
+	while (true) {
+		k_sem_take(&run_request_sem, K_FOREVER);
+
+		uint8_t payload_size = run_request_payload_size;
+		uint16_t packets = run_request_packets;
+
 		// also resets the arrays and counters
 		benchmark_on();
 		k_sleep(K_MSEC(IDLE_GAP_MS));
 
-		err = send_packets(PACKETS_PER_PAYLOAD, payload_sizes[p], true);
+		err = send_packets(packets, payload_size, true);
 		if (err) {
-			shell_error(shell, "[AUTO] Sending payload %u failed (err %d), stopping", payload_sizes[p], err);
-			return;
+			shell_error(shell, "[AUTO] Sending payload %u failed (err %d)", payload_size, err);
 		}
 
 		k_sleep(K_MSEC(IDLE_GAP_MS));
 		benchmark_off();
 		clear_payload_filter();
 
-		err = dump_results(payload_sizes[p], PACKETS_PER_PAYLOAD);
+		// sent even after a send error, A waits for RES_END and sees count < packets
+		err = dump_results(payload_size, packets);
 		if (err) {
-			shell_error(shell, "[AUTO] Sending the results of payload %u failed (err %d), stopping", payload_sizes[p], err);
-			return;
+			shell_error(shell, "[AUTO] Sending the results of payload %u failed (err %d)", payload_size, err);
 		}
 	}
-
-	uint8_t done = RESULTS_BATCH_DONE;
-	(void)send_results(default_conn, &done, 1);
-
-	shell_print(shell, "[AUTO] Batch done");
 }
 
 #endif /* CONFIG_BENCHMARK_AUTO_DUT */

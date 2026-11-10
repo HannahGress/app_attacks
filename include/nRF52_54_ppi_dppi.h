@@ -29,53 +29,59 @@
  */
 
 /*
- * Channel for the end of KSGEN
- * The start is captured in the code, not over Event/Task chain
+ * Channel for the end of KSGEN (CC[2]); its FORK also captures the encryption start (CC[3]),
+ * because the encryption starts on that same ENDKSGEN event (ENDKSGEN_CRYPT short)
  */
 #define HAL_CRYPT_END_TIME_KSGEN_PPI 0
 
-/* Different channel for encryption and decryption start, but the end event is the same, so we only need one channel for the end event */
-#define HAL_CRYPT_START_TIME_ENCRYPT_PPI 1
+/* Different channel for decryption start, but the end event is the same, so we only need one channel for the end event */
 #define HAL_CRYPT_START_TIME_DECRYPT_PPI 2
 #define HAL_CRYPT_END_TIME_ENDCRYPT_PPI 3
 
 /*
- * GPIO current-measurement marker (nRF52840) -- CROSS-CHECK ONLY
+ * KSGEN START IN HARDWARE (TX only)
  *
- * /!\ This pin (P0.03, PPK II D0) is NOT the measurement we are interested in.
- * /!\ The relevant measurement (only the send_data notification encryption)
- * /!\ is the DATA-PACKET MARKER on P0.04 (PACKET_MARKER_*, PPK II D1) below.
+ * The CCM has no "KSGEN started" event. So while benchmarking, radio.c triggers
+ * EGU0 instead of CCM TASKS_KSGEN, and this PPI channel starts KSGEN (TEP) and
+ * captures t_start_KSGEN in TIMER3 CC[0] (FORK) on the same clock edge, no CPU
+ * cycles in between. It is only enabled in benchmark_on(); otherwise radio.c
+ * starts KSGEN directly, so encryption never depends on this channel.
+ * EGU0/SWI0 is unused here (the controller only uses the SWI4/SWI5 IRQs) and
+ * its interrupt stays disabled.
  *
- * P0.03 marks EVERY AES-CCM operation, i.e. all encryptions AND all
- * decryptions (on the nRF52 the CCM ENDKSGEN/ENDCRYPT events are shared by
- * both). We keep it only as a reference/sanity check: every P0.04 pulse must
- * line up with exactly one P0.03 pulse, which shows that the P0.04 filter
- * picks the right CCM operation.
- *
- * Drives the pin LOW for the duration of each AES-CCM operation (active-low),
- * fired straight from the CCM hardware events over PPI + GPIOTE, so there is
- * no CPU involvement and no software jitter:
- *   EVENTS_ENDKSGEN -> pin LOW  (crypt starts)
- *   EVENTS_ENDCRYPT -> pin HIGH (crypt ends)
- *
- * To measure a different pin, change PORT/PIN and rebuild + reflash.
+ * /!\ Must be a channel no driver allocates at runtime: Zephyr's nrfx allocator
+ * hands out the HIGHEST free channel first (e.g. the UART takes 19 for
+ * ENDTX->STOPTX on boards with a serial console). Channel 1 is handed out last.
  */
-#define CURRENT_MARKER_PORT          0   /* GPIO port: P0 -> 0, P1 -> 1         */
-#define CURRENT_MARKER_PIN           3   /* P0.03: free on the DK (no LED/button,
+#define KSGEN_START_EGU_EVENT        0   /* NRF_EGU0 TASKS_TRIGGER/EVENTS_TRIGGERED[0] */
+#define KSGEN_START_ENC_PPI          1
+
+/*
+ * KSGEN MARKER (active low) on P0.<KSGEN_MARKER_PIN> -> wire to PPK II D0
+ *
+ * Goes LOW for the keystream generation of a benchmarked notification only:
+ *   EGU0 (= KSGEN start)  -> pin LOW
+ *   CCM EVENTS_ENDKSGEN   -> pin HIGH
+ * The DATA-PACKET MARKER on P0.04 (D1) below goes LOW on that same ENDKSGEN
+ * edge, so per packet the PPK II sees a D0 pulse directly followed by a D1 pulse
+ * (KSGEN, then encryption). Gated per packet exactly like P0.04 (enabled by the
+ * filter in lll_conn.c, disabled in lll_conn_isr_tx).
+ */
+#define KSGEN_MARKER_PORT            0   /* GPIO port: P0 -> 0, P1 -> 1         */
+#define KSGEN_MARKER_PIN             3   /* P0.03: free on the DK (no LED/button,
                                           * draws no current of its own)        */
-#define CURRENT_MARKER_GPIOTE_CH     0   /* free GPIOTE channel (0..7)          */
-#define CURRENT_MARKER_ENC_START_PPI 4   /* free PPI channel: pin -> LOW       */
-#define CURRENT_MARKER_ENC_END_PPI   5   /* free PPI channel: pin -> HIGH      */
+#define KSGEN_MARKER_GPIOTE_CH       0   /* free GPIOTE channel (0..7)          */
+#define KSGEN_MARKER_START_PPI       4   /* free PPI channel: pin -> LOW       */
+#define KSGEN_MARKER_END_PPI         5   /* free PPI channel: pin -> HIGH      */
 
 /*
  * DATA-PACKET MARKER (active low) on P0.<PACKET_MARKER_PIN>  -> wire to PPK II D1
  *
- * >>> THIS IS THE RELEVANT MEASUREMENT PIN. <<<
- * It goes LOW ONLY for the encryption of a real send_data notification, so it
- * can be used on its own; P0.03 (D0) above is just the cross-check.
+ * It goes LOW ONLY for the encryption of a real send_data notification
+ * (KSGEN excluded, that one is on P0.03 / D0 above).
  *
- * Wired to the same CCM events as the current marker (ENDKSGEN -> LOW,
- * ENDCRYPT -> HIGH) over PPI + GPIOTE, so the pin edges are hardware-crisp with
+ * Wired to the CCM events (ENDKSGEN -> LOW, ENDCRYPT -> HIGH) over PPI +
+ * GPIOTE, so the pin edges are hardware-crisp with
  * no software jitter. The difference: these two PPI channels are kept DISABLED
  * by default and only enabled, per packet, by the `benchmarked_tx_packet`
  * filter in the controller (lll_conn.c) for a real send_data TX encryption,
@@ -87,9 +93,11 @@
 #define PACKET_MARKER_GPIOTE_CH      1   /* free GPIOTE channel (0..7)          */
 /* NOTE: PPI 6 and 7 are NOT free, the BLE controller owns them
  * (HAL_EVENT_TIMER_START_PPI / HAL_RADIO_READY_TIME_CAPTURE_PPI) and touching
- * them causes supervision timeouts (0x08). 17/18 are only used by the
+ * them causes supervision timeouts (0x08). 17/18/19 are only used by the
  * controller with Coded PHY or direction finding enabled, recheck
- * radio_nrf5_ppi_resources.h if you turn those on. */
+ * radio_nrf5_ppi_resources.h if you turn those on. 19 is taken by the UART
+ * driver at runtime (see KSGEN_START_ENC_PPI above), so 17/18 are the next
+ * ones it would hand out if another driver allocates a PPI channel. */
 #define PACKET_MARKER_ENC_START_PPI  17  /* free PPI channel: pin -> LOW       */
 #define PACKET_MARKER_ENC_END_PPI    18  /* free PPI channel: pin -> HIGH      */
 

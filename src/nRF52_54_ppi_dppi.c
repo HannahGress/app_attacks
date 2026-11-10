@@ -56,12 +56,19 @@ void hal_radio_ccm_nRF52840_ppi_config() {
      */
 
     /*
-     * ENCRYPTION:
-     * start of KSGEN is triggered in SW -> radio.c, line 2532
-     * in the function static void *radio_ccm_ext_tx_pkt_set(struct ccm *cnf, uint8_t pdu_type, void *pkt)
-     * We do register this event/this task in a register of the TIMER3 instance.
-     * We don't have a PPI channel for that anymore
+     * ENCRYPTION: start of KSGEN in hardware
+     * radio_ccm_ext_tx_pkt_set() (radio.c) triggers EGU0 while this channel is enabled.
+     * EGU0 -> CCM TASKS_KSGEN, FORK -> TIMER3 CAPTURE[0]: KSGEN start and timestamp on the same edge
      */
+    nrf_ppi_channel_endpoint_setup(
+        NRF_PPI,
+        KSGEN_START_ENC_PPI,
+        (uint32_t)&NRF_EGU0->EVENTS_TRIGGERED[KSGEN_START_EGU_EVENT],
+        (uint32_t)&NRF_CCM->TASKS_KSGEN);
+    nrf_ppi_fork_endpoint_setup(
+        NRF_PPI,
+        KSGEN_START_ENC_PPI,
+        (uint32_t)&NRF_TIMER3->TASKS_CAPTURE[HAL_EVENT_TIMER_KSGEN_START_ENC_CC_OFFSET]);
 
     /*
      * DECRYPTION:
@@ -71,24 +78,21 @@ void hal_radio_ccm_nRF52840_ppi_config() {
      * We don't have a PPI channel for that anymore
      */
 
-    // ENDCR: when KSGEN ends
+    // ENDKSGEN: KSGEN ends, and the encryption starts on the same event (ENDKSGEN_CRYPT short)
     nrf_ppi_channel_endpoint_setup(
     NRF_PPI,
     HAL_CRYPT_END_TIME_KSGEN_PPI,
     (uint32_t)&NRF_CCM->EVENTS_ENDKSGEN,
     (uint32_t)&NRF_TIMER3->TASKS_CAPTURE[HAL_EVENT_TIMER_KSGEN_END_CC_OFFSET]);
+    nrf_ppi_fork_endpoint_setup(
+    NRF_PPI,
+    HAL_CRYPT_END_TIME_KSGEN_PPI,
+    (uint32_t)&NRF_TIMER3->TASKS_CAPTURE[HAL_EVENT_TIMER_CCM_START_ENC_CC_OFFSET]);
 
 
     /*
-     * ENCRYPTION & DECRYPTION
+     * DECRYPTION
      */
-
-    // when encryption starts -> take actual time
-    nrf_ppi_channel_endpoint_setup(
-    NRF_PPI,
-    HAL_CRYPT_START_TIME_ENCRYPT_PPI,
-    (uint32_t)&NRF_CCM->EVENTS_ENDKSGEN,
-    (uint32_t)&NRF_TIMER3->TASKS_CAPTURE[HAL_EVENT_TIMER_CCM_START_ENC_CC_OFFSET]);
 
     // when decryption starts (closer to it)
     nrf_ppi_channel_endpoint_setup(
@@ -105,40 +109,33 @@ void hal_radio_ccm_nRF52840_ppi_config() {
         (uint32_t)&(NRF_TIMER3->TASKS_CAPTURE[HAL_EVENT_TIMER_CCM_END_ENDCRYPT_CC_OFFSET]));
 
     /*
-     * GPIO CURRENT-MEASUREMENT MARKER (active low) on P0.<CURRENT_MARKER_PIN>
-     *
-     * Cross Check only! marks EVERY CCM operation (all encryptions AND
-     * decryptions). The relevant measurement (only the send_data
-     * notification encryption) is the DATA-PACKET MARKER on P0.04 below.
+     * KSGEN MARKER (active low) on P0.<KSGEN_MARKER_PIN> -> PPK II D0
      *
      * GPIOTE turns the pin into a peripheral with SET/CLR tasks; PPI fires
-     * those tasks directly from the CCM events, so the pin frames the crypto
-     * window in hardware
-     *
-     * The GPIOTE channel starts HIGH (active-low!). CLR drives it LOW at crypt start,
-     * SET drives it back HIGH at crypt end.
-     * (The two PPI channels are enabled/disabled in benchmark_on()/off().)
+     * those tasks directly from the events, so the pin frames KSGEN in hardware.
+     * The GPIOTE channel starts HIGH (active-low!). Like the packet marker below,
+     * the two PPI channels are only enabled per benchmarked packet (lll_conn.c).
      */
     nrf_gpiote_task_configure(
         NRF_GPIOTE,
-        CURRENT_MARKER_GPIOTE_CH,
-        NRF_GPIO_PIN_MAP(CURRENT_MARKER_PORT, CURRENT_MARKER_PIN),
+        KSGEN_MARKER_GPIOTE_CH,
+        NRF_GPIO_PIN_MAP(KSGEN_MARKER_PORT, KSGEN_MARKER_PIN),
         NRF_GPIOTE_POLARITY_TOGGLE,        /* ignored by the SET/CLR tasks */
         NRF_GPIOTE_INITIAL_VALUE_HIGH);    /* idle = 1 (active low)        */
-    nrf_gpiote_task_enable(NRF_GPIOTE, CURRENT_MARKER_GPIOTE_CH);
+    nrf_gpiote_task_enable(NRF_GPIOTE, KSGEN_MARKER_GPIOTE_CH);
 
-    /* crypt start (ENDKSGEN) -> pin LOW (GPIOTE CLR) */
+    /* KSGEN start (EGU0) -> pin LOW (GPIOTE CLR) */
     nrf_ppi_channel_endpoint_setup(
         NRF_PPI,
-        CURRENT_MARKER_ENC_START_PPI,
-        (uint32_t)&NRF_CCM->EVENTS_ENDKSGEN,
+        KSGEN_MARKER_START_PPI,
+        (uint32_t)&NRF_EGU0->EVENTS_TRIGGERED[KSGEN_START_EGU_EVENT],
         nrf_gpiote_task_address_get(NRF_GPIOTE, NRF_GPIOTE_TASK_CLR_0));
 
-    /* crypt end (ENDCRYPT) -> pin HIGH (GPIOTE SET) */
+    /* KSGEN end (ENDKSGEN) -> pin HIGH (GPIOTE SET) */
     nrf_ppi_channel_endpoint_setup(
         NRF_PPI,
-        CURRENT_MARKER_ENC_END_PPI,
-        (uint32_t)&NRF_CCM->EVENTS_ENDCRYPT,
+        KSGEN_MARKER_END_PPI,
+        (uint32_t)&NRF_CCM->EVENTS_ENDKSGEN,
         nrf_gpiote_task_address_get(NRF_GPIOTE, NRF_GPIOTE_TASK_SET_0));
 
     /*

@@ -160,42 +160,41 @@ the encryption of each packet). Connect this pin to the PPK II and trigger it, s
 up with the event. The pins use **active-low** logic: the line is **1 (idle)**
 normally and **0 (active)** while the event is happening.
 
-We use **`P0.03`** for this: it has
-nothing connected to it by default, so unlike an LED pin it draws no current
-of its own and cannot skew the measurement.
+We use **`P0.03`** and **`P0.04`** for this: they have nothing connected to
+them by default, so unlike an LED pin they draw no current of their own and
+cannot skew the measurement.
 
-### Cross-check marker: every CCM operation (`P0.03`, nRF52840)
+### KSGEN and encryption markers (`P0.03` / `P0.04`, nRF52840)
 
-> **Important:** `P0.03` (PPK II **D0**) is only a **cross-check**. It marks
-> *all* encryptions **and** decryptions. The relevant measurement (only the
-> encryption of each `send_data` notification) is on **`P0.04`** (PPK II
-> **D1**). Every `P0.04` pulse should line up with exactly one `P0.03` pulse.
+Both pins only dip for the benchmarked `send_data` notifications (no
+keep-alives, no resends, no decryptions), driven straight from hardware events
+via PPI + GPIOTE without the CPU involved:
 
-While benchmarking is on, `P0.03` is pulled low for the duration of every
-AES-CCM operation. It is driven straight from the CCM hardware events via
-PPI + GPIOTE without CPI involved, so it is very accurate.
+| Pin | PPK II | Low from → to | Timer field |
+|---|---|---|---|
+| `P0.03` | **D0** | KSGEN start → `ENDKSGEN` (keystream generation) | `delta_KSGEN` |
+| `P0.04` | **D1** | `ENDKSGEN` → `ENDCRYPT` (encryption) | `delta_ENCRYPT` |
 
-For measuring 100 packets of a specific payload size, follow the instructions in the table above and start recording in
-the nRF Power Profiler App (via nRF Connect Desktop). There, you can export a CSV for further processing. 
+So every packet shows a D0 pulse directly followed by a D1 pulse. The CCM has
+no "KSGEN started" event, so while benchmarking the controller starts KSGEN via
+EGU0 → PPI, which also captures the timer and pulls `P0.03` low on the same
+clock edge. With benchmarking off, KSGEN is started directly as in stock Zephyr.
 
-
-Probe `P0.03` and trigger on the **falling edge**; each low pulse frames one
-AES-CCM operation.
-
-> **Note:** on the nRF52 the CCM `ENDKSGEN`/`ENDCRYPT` events are shared by
-> encryption *and* decryption, so the pin marks *every* CCM operation. During
-> `send_data` the regular pulses just before each transmission are the
-> encryptions of your outgoing packets. Since AES is symmetric encryption, the operations 
-> shouldn't vary much.
+The automated measurement (`data_processing/run_benchmark.py`) records both
+pins with the PPK II, `data_processing/evaluate.py` turns them into energy per
+KSGEN / encryption. Short KSGENs (~10 µs at tiny payloads) can fall between two
+PPK II samples (10 µs); those rows get no KSGEN energy (`ksgen_missing`).
 
 ### Using a different pin or event
 
-To move the marker to another pin, change these defines in
+To move a marker to another pin, change these defines in
 `app_attacks/include/nRF52_54_ppi_dppi.h`, then rebuild and reflash:
 
 ```c
-#define CURRENT_MARKER_PORT  0    // GPIO port: P0 -> 0, P1 -> 1
-#define CURRENT_MARKER_PIN   3    // pin number within that port
+#define KSGEN_MARKER_PORT    0    // GPIO port: P0 -> 0, P1 -> 1
+#define KSGEN_MARKER_PIN     3    // pin number within that port
+#define PACKET_MARKER_PORT   0
+#define PACKET_MARKER_PIN    4
 ```
 
 Pick a **free** pin — on the nRF52840 DK avoid the LEDs (`P0.13`–`P0.16`) and
@@ -203,4 +202,7 @@ buttons (`P0.11`, `P0.12`, `P0.24`, `P0.25`); other free P0 pins are `P0.02`,
 `P0.04` and `P0.28`. To mark a **different event**, point the two PPI channels in
 `hal_radio_ccm_nRF52840_ppi_config()` at another event/task pair. Each marker
 needs one free GPIOTE channel and two free PPI channels; the BLE controller
-already uses PPI 6–13 and 20–27, so keep to channels 0–5.
+already uses PPI 6–13 and 20–27 (14–19 only with Coded PHY, direction finding
+or PA/LNA). The benchmark uses 0–5 and 17–18. Watch out: drivers allocate
+PPI channels at runtime, highest free channel first (the UART takes 19), so
+prefer low channel numbers.

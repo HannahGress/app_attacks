@@ -861,6 +861,41 @@ static int cmd_subscribe(const struct shell *sh, size_t argc, char *argv[])
 	return 0;
 }
 
+// Device A: "run <payload_size> [n]" lets the DUT (auto_dut build) measure one payload size
+static int cmd_run(const struct shell *sh, size_t argc, char *argv[])
+{
+	char *endptr;
+	long payload_size = strtol(argv[1], &endptr, 10);
+
+	if (*endptr != '\0' || payload_size < 1 || payload_size > 244) {
+		shell_error(sh, "payload_size must be 1-244");
+		return -EINVAL;
+	}
+
+	long n = 100;
+	if (argc > 2) {
+		n = strtol(argv[2], &endptr, 10);
+		if (*endptr != '\0' || n < 1 || n > 100) {
+			shell_error(sh, "n must be 1-100");
+			return -EINVAL;
+		}
+	}
+
+	if (!default_conn) {
+		shell_error(sh, "Not connected");
+		return -ENOTCONN;
+	}
+
+	int err = request_run(default_conn, (uint8_t)payload_size, (uint16_t)n);
+	if (err) {
+		shell_error(sh, "RUN failed (err %d), run discover first?", err);
+		return err;
+	}
+
+	shell_print(sh, "RUN,%ld,%ld", payload_size, n);
+	return 0;
+}
+
 static int cmd_knob(const struct shell *sh, size_t argc, char *argv[])
 {
 	if (argc != 2) {
@@ -913,16 +948,21 @@ int main(void)
 {
 	printf("BLE Testing Framework %s\n", CONFIG_BOARD_TARGET);
 
-#if defined(CONFIG_BENCHMARK_AUTO_DUT)
+#if defined(CONFIG_BENCHMARK_AUTO_DUT) || defined(CONFIG_BENCHMARK_IDLE_TEST)
 	// nobody types "bleframework init" on the DUT, so the shell pointer used by
 	// every shell_print must be set here (it is NULL otherwise)
 #if defined(CONFIG_SHELL_BACKEND_DUMMY)
-	// /!\ serial shell disabled in auto_dut.conf: all output goes nowhere, see there to reactivate it
+	// /!\ serial shell disabled in auto_dut.conf / idle_test.conf: all output goes nowhere
 	shell = shell_backend_dummy_get_ptr();
 #else
 	shell = shell_backend_uart_get_ptr();
 #endif
+#endif
+
+#if defined(CONFIG_BENCHMARK_AUTO_DUT)
 	auto_benchmark_run();
+#elif defined(CONFIG_BENCHMARK_IDLE_TEST)
+	idle_test_run();
 #endif
 
 	return 0;
@@ -971,6 +1011,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD_ARG(ifa4, NULL, "", cmd_ifa_stage4, 3, 0),
 	SHELL_CMD_ARG(ifa, NULL, "ifa addr addr_type n \n addr is target address formatted as "HELP_ADDR_LE" \n n is number of bondings\n", cmd_ifa, 4, 0),
 	SHELL_CMD_ARG(send_data, NULL, "<count> [payload_size]", cmd_send_data, 2, 2),
+	SHELL_CMD_ARG(run, NULL, "<payload_size> [n] (DUT in auto_dut build measures one payload size)", cmd_run, 2, 1),
 	SHELL_CMD_ARG(benchmark, NULL, "<value: on, off>", cmd_benchmark, 2, 0),
 	SHELL_CMD(discover, NULL, "Discovery of Services and Characteristics", cmd_service_and_characteristic_discovery),
 	SHELL_CMD(subscribe, NULL, "Subscription to a predefinec characteristic", cmd_subscribe),
