@@ -238,8 +238,14 @@ class SerialController:
                 or ("advertise stop" in command and "Advertising successfully stopped" in line)
                 or ("scan stop" in command and "Scan successfully stopped" in line)
                 or ("discover" in command and "CCC handle" in line)
-                or ("unpair" in command and "Pairing successfully cleared" in line)):
+                # "Pairing successfully cleared" (one address) or "Pairings successfully cleared" (all)
+                or ("unpair" in command and "successfully cleared" in line)):
                     return True, "\n".join(response_lines)
+
+                # fail fast instead of waiting for the timeout (e.g. -120: already initialized)
+                if ("init" in command and "Bluetooth init failed" in line) or \
+                   ("unpair" in command and "Failed to clear pairing" in line):
+                    return False, "\n".join(response_lines)
 
                 if "subscribe" in command:
                     if line.startswith("Subscribed"):

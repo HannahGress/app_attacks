@@ -178,7 +178,7 @@ via PPI + GPIOTE without the CPU involved:
 So every packet shows a D0 pulse directly followed by a D1 pulse. The CCM has
 no "KSGEN started" event, so while benchmarking the controller starts KSGEN via
 EGU0 → PPI, which also captures the timer and pulls `P0.03` low on the same
-clock edge. With benchmarking off, KSGEN is started directly as in stock Zephyr.
+edge. With benchmarking off, KSGEN is started directly as in stock Zephyr.
 
 The automated measurement (`data_processing/run_benchmark.py`) records both
 pins with the PPK II, `data_processing/evaluate.py` turns them into energy per
