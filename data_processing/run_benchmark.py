@@ -46,10 +46,9 @@ BOOT_WAIT_S = 4       # B: 2 s boot delay + BLE init + advertising
 PRE_RECORD_S = 0.2    # PPK runs a bit before "run", B adds another 500 ms idle gap
 RUN_TIMEOUT_S = 30    # per block
 BLOCK = 100           # B's timer array holds 100 records (SUM_ARRAY_MAX_SIZE), more packets = more blocks
-VOLTAGE_V = 3.0       # PPK II source voltage for Device B
 
 
-def open_ppk(port, voltage=VOLTAGE_V):
+def open_ppk(port):
     """PPK II as source meter (it powers Device B), port None = first one found."""
     port = port or next(iter(PPK2_API.list_devices()), None)
     if not port:
@@ -57,7 +56,7 @@ def open_ppk(port, voltage=VOLTAGE_V):
     ppk = PPK2_API(port, timeout=1, write_timeout=1, exclusive=True)
     ppk.get_modifiers()
     ppk.use_source_meter()
-    ppk.set_source_voltage(int(voltage * 1000))
+    ppk.set_source_voltage(int(evaluate.VOLTAGE_V * 1000))
     return ppk
 
 
@@ -258,7 +257,7 @@ def main():
         sys.exit(1)
 
     ppk.toggle_DUT_power("ON")
-    print(f"Device B powered with {VOLTAGE_V} V, waiting {BOOT_WAIT_S} s for it to boot")
+    print(f"Device B powered with {evaluate.VOLTAGE_V} V, waiting {BOOT_WAIT_S} s for it to boot")
     time.sleep(BOOT_WAIT_S)
 
     try:
@@ -273,7 +272,7 @@ def main():
 
     # only this run's payloads, their rows replace the older ones in summary.csv
     print("Evaluating the recordings, please wait...")
-    evaluate.evaluate_setup(args.root, args.setup, VOLTAGE_V, payloads)
+    evaluate.evaluate_setup(args.root, args.setup, payloads)
 
 
 if __name__ == "__main__":

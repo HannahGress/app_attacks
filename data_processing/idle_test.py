@@ -7,7 +7,7 @@ B marks the start of every phase with a short pulse on D1 (see src/idle_test.c).
 Prints the mean current per phase and writes the whole recording to measurements/idle/ppk_idle.csv.
 
 Usage:
-    python idle_test.py [--voltage 3.0] [--port-ppk COMx]
+    python idle_test.py [--port-ppk COMx]
 """
 
 import argparse
@@ -27,12 +27,11 @@ SETTLE_S = 0.5                       # skip the start of each phase (e.g. bt_ena
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--voltage", type=float, default=3.0, help="PPK II source voltage in V")
     parser.add_argument("--port-ppk", help="serial port of the PPK II (default: first one found)")
     parser.add_argument("--out", type=Path, default=Path("measurements/idle"))
     args = parser.parse_args()
 
-    ppk = open_ppk(args.port_ppk, args.voltage)
+    ppk = open_ppk(args.port_ppk)
 
     # record from power-on, so the boot is in the recording too
     recorder = Recorder(ppk)

@@ -15,7 +15,7 @@ Pins (active low, both on Device B, only for the benchmarked notifications, no r
     D1 = P0.04, encryption (ENDKSGEN -> ENDCRYPT), starts on the same edge where D0 ends
 
 Usage:
-    python evaluate.py [--root measurements/enc] [--setup SecCon_16Bytes] [--voltage 3.0]
+    python evaluate.py [--root measurements/enc] [--setup SecCon_16Bytes]
 """
 
 import argparse
@@ -32,6 +32,7 @@ ENCRYPT = "D1"  # P0.04
 KSGEN = "D0"    # P0.03
 CURRENT = "Current(uA)"
 
+VOLTAGE_V = 3.0          # PPK II source voltage for Device B (always 3.0 V)
 SAMPLE_US = 10           # PPK II at 100 kHz
 MAX_PULSE_US = 1000      # longer lows are no encryption (e.g. pins read 0 before GPIO init)
 IDLE_WINDOW_MS = 400     # baseline current: median of this window before the first pulse
@@ -76,7 +77,7 @@ def ksgen_runs(pin, enc_start):
     return np.where(found, k_start[j], 0), np.where(found, k_end[j], 1), found
 
 
-def evaluate_payload(ppk_path, timer_path, voltage):
+def evaluate_payload(ppk_path, timer_path):
     ppk = pd.read_csv(ppk_path, usecols=[CURRENT, ENCRYPT, KSGEN],
                       dtype={CURRENT: "float32", ENCRYPT: "int8", KSGEN: "int8"})
     timer = pd.read_csv(timer_path)
@@ -123,8 +124,8 @@ def evaluate_payload(ppk_path, timer_path, voltage):
         mean_uA = np.where(found, (csum[e] - csum[s]) / (e - s), np.nan)
         ops[f"ppk_{phase}_us"] = np.where(found, (e - s) * SAMPLE_US, np.nan)
         ops[f"{phase}_current_uA"] = mean_uA
-        ops[f"{phase}_energy_uJ"] = mean_uA * ops[f"{phase}_us"] * 1e-6 * voltage
-        ops[f"{phase}_energy_net_uJ"] = (mean_uA - idle_uA) * ops[f"{phase}_us"] * 1e-6 * voltage
+        ops[f"{phase}_energy_uJ"] = mean_uA * ops[f"{phase}_us"] * 1e-6 * VOLTAGE_V
+        ops[f"{phase}_energy_net_uJ"] = (mean_uA - idle_uA) * ops[f"{phase}_us"] * 1e-6 * VOLTAGE_V
 
     # same columns on every board, the ones a board does not have stay empty
     return ops.reindex(columns=OPS_COLUMNS), idle_uA
@@ -148,7 +149,7 @@ def summarize(payload, ops, idle_uA):
     return row
 
 
-def evaluate_setup(root, setup, voltage, payloads=None):
+def evaluate_setup(root, setup, payloads=None):
     """payloads: only evaluate these (default: every raw file); their rows replace older ones in summary.csv."""
     raw = Path(root) / "raw" / setup
     filtered = Path(root) / "filtered" / setup
@@ -166,7 +167,7 @@ def evaluate_setup(root, setup, voltage, payloads=None):
             print(f"Warning: {ppk_path} missing, skipped")
             continue
 
-        ops, idle_uA = evaluate_payload(ppk_path, timer_path, voltage)
+        ops, idle_uA = evaluate_payload(ppk_path, timer_path)
         ops.round(4).to_csv(filtered / f"{payload:03d}.csv", index=False)
         rows.append(summarize(payload, ops, idle_uA))
 
@@ -199,14 +200,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--root", type=Path, default=Path("measurements/enc"))
     parser.add_argument("--setup", choices=SETUPS, help="default: every setup that has raw data")
-    parser.add_argument("--voltage", type=float, default=3.0, help="PPK II source voltage in V")
     args = parser.parse_args()
 
     setups = [args.setup] if args.setup else [s for s in SETUPS if any((args.root / "raw" / s).glob("timer_*.csv"))]
     if not setups:
         sys.exit(f"No measurements below {args.root / 'raw'}")
     for setup in setups:
-        evaluate_setup(args.root, setup, args.voltage)
+        evaluate_setup(args.root, setup)
 
 
 if __name__ == "__main__":
