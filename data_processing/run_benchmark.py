@@ -26,9 +26,9 @@ import pandas as pd
 from ppk2_api.ppk2_api import PPK2_API
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "serial_interface"))
-from serial_controller import SerialController, find_nordic_boards  # noqa: E402  (Hannah's script, unchanged)
+from serial_controller import SerialController, find_nordic_boards
 
-import evaluate  # noqa: E402
+import evaluate
 
 # setup -> pairing configuration on A (knob = 7-byte key, scda = Legacy pairing)
 SETUP_COMMANDS = {
@@ -46,6 +46,19 @@ BOOT_WAIT_S = 4       # B: 2 s boot delay + BLE init + advertising
 PRE_RECORD_S = 0.2    # PPK runs a bit before "run", B adds another 500 ms idle gap
 RUN_TIMEOUT_S = 30    # per block
 BLOCK = 100           # B's timer array holds 100 records (SUM_ARRAY_MAX_SIZE), more packets = more blocks
+VOLTAGE_V = 3.0       # PPK II source voltage for Device B
+
+
+def open_ppk(port, voltage=VOLTAGE_V):
+    """PPK II as source meter (it powers Device B), port None = first one found."""
+    port = port or next(iter(PPK2_API.list_devices()), None)
+    if not port:
+        sys.exit("No PPK II found (close the Power Profiler app, it blocks the port)")
+    ppk = PPK2_API(port, timeout=1, write_timeout=1, exclusive=True)
+    ppk.get_modifiers()
+    ppk.use_source_meter()
+    ppk.set_source_voltage(int(voltage * 1000))
+    return ppk
 
 
 class Recorder:
@@ -226,7 +239,6 @@ def main():
     parser.add_argument("--setup", required=True, choices=evaluate.SETUPS)
     parser.add_argument("--payloads", default=evaluate.DEFAULT_PAYLOADS, help="e.g. 1,20,50 or 1-244")
     parser.add_argument("--n", type=int, required=True, help="packets per payload size")
-    parser.add_argument("--voltage", type=float, default=3.0, help="PPK II source voltage in V")
     parser.add_argument("--port-a", help="serial port of Device A (default: ask nrfutil)")
     parser.add_argument("--port-ppk", help="serial port of the PPK II (default: first one found)")
     parser.add_argument("--root", type=Path, default=Path("measurements/enc"))
@@ -238,13 +250,7 @@ def main():
     out_dir = args.root / "raw" / args.setup
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    ppk_port = args.port_ppk or next(iter(PPK2_API.list_devices()), None)
-    if not ppk_port:
-        sys.exit("No PPK II found (close the Power Profiler app, it blocks the port)")
-    ppk = PPK2_API(ppk_port, timeout=1, write_timeout=1, exclusive=True)
-    ppk.get_modifiers()
-    ppk.use_source_meter()
-    ppk.set_source_voltage(int(args.voltage * 1000))
+    ppk = open_ppk(args.port_ppk)
 
     a = SerialController()
     a.serial.port = pick_board(args.port_a)
@@ -252,7 +258,7 @@ def main():
         sys.exit(1)
 
     ppk.toggle_DUT_power("ON")
-    print(f"Device B powered with {args.voltage} V, waiting {BOOT_WAIT_S} s for it to boot")
+    print(f"Device B powered with {VOLTAGE_V} V, waiting {BOOT_WAIT_S} s for it to boot")
     time.sleep(BOOT_WAIT_S)
 
     try:
@@ -267,7 +273,7 @@ def main():
 
     # only this run's payloads, their rows replace the older ones in summary.csv
     print("Evaluating the recordings, please wait...")
-    evaluate.evaluate_setup(args.root, args.setup, args.voltage, payloads)
+    evaluate.evaluate_setup(args.root, args.setup, VOLTAGE_V, payloads)
 
 
 if __name__ == "__main__":

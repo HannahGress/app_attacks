@@ -16,10 +16,9 @@ import time
 from pathlib import Path
 
 import numpy as np
-from ppk2_api.ppk2_api import PPK2_API
 
 import evaluate
-from run_benchmark import Recorder
+from run_benchmark import Recorder, open_ppk
 
 PHASES = ("sleep", "timer", "sleep again", "ble adv", "ble adv + timer")
 RECORD_S = 1 + 5 * len(PHASES) + 2  # settle time on B + 5 s per phase + margin
@@ -33,13 +32,7 @@ def main():
     parser.add_argument("--out", type=Path, default=Path("measurements/idle"))
     args = parser.parse_args()
 
-    port = args.port_ppk or next(iter(PPK2_API.list_devices()), None)
-    if not port:
-        sys.exit("No PPK II found (close the Power Profiler app, it blocks the port)")
-    ppk = PPK2_API(port, timeout=1, write_timeout=1, exclusive=True)
-    ppk.get_modifiers()
-    ppk.use_source_meter()
-    ppk.set_source_voltage(int(args.voltage * 1000))
+    ppk = open_ppk(args.port_ppk, args.voltage)
 
     # record from power-on, so the boot is in the recording too
     recorder = Recorder(ppk)
