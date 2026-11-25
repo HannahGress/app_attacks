@@ -125,33 +125,29 @@ The project consist of two repositories, a fork of the [Zephyr project](https://
 15. If you want to add debugging, follow [these steps](https://docs.zephyrproject.org/latest/develop/tools/clion.html#configure-zephyr-parameters-for-debug)
 
 ## Automation of benchmarking
-- Attach two boards
-- Optional: Attach a PPK II
+- Device A: normal build, connected via USB
+- Device B (DUT): build with `-DEXTRA_CONF_FILE=auto_dut.conf`, powered by the PPK II (no USB), D0 → `P0.03`, D1 → `P0.04`
 - Open cmd or just use the CLion Terminal
-- Switch to `app_attacks`
 - Activate the virtual environment, e. g. (`.ble-venv\Scripts\activate.bat`) or (`.\.venv\Scripts\Activate.ps1`)
-- `cd serial_interface`
-- `python serial_controller.py`
-- Follow the instructions on the terminal
-  
+- `cd app_attacks/data_processing`
+- `python run_benchmark.py --setup SecCon_16Bytes --n 1000 --payloads 1-244`
+- The results land in `data_processing/measurements/enc/` (`raw/`, `filtered/`, `accumulated/<Setup>/summary.csv`)
+
 ## [INFO ONLY] What's happening under the hood during benchmarking
 
-| Device A                                                                | Device B                                                                            |
+`run_benchmark.py` drives Device A over its serial shell. Device B runs on its own (`src/auto_benchmark.c`)
+and has no serial shell at all.
+
+| Device A (shell commands from `run_benchmark.py`)                       | Device B (DUT, automatic)                                                           |
 |-------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
-| `bleframework init`                                                     | `bleframework init`                                                                 |
-| `bleframework unpair all`                                               | `bleframework advertise start`                                                      |
-| `bleframework scan start`                                               |                                                                                     |
-| // when device A is found <br> `bleframework scan stop`                 |                                                                                     |
+| `bleframework init`                                                     | init, `advertise start`                                                             |
+| `bleframework unpair all`, `knob` / `scda` (pairing setup)              |                                                                                     |
+| `bleframework scan start` / `scan stop`                                 |                                                                                     |
 | `bleframework pair <BDA (public \| random)>`                            |                                                                                     |
-| // discover the characterisitc to subscribe <br>`bleframework discover` |                                                                                     |
-| // subscribe to it <br> `bleframework subscribe`                        |                                                                                     |
-| // optional: enable benchmarking <br> `bleframework benchmark on`       | // enable benchmarking <br> `bleframework benchmark on`                             |
-|                                                                         | `bleframework send_data <n> <payload size>`                                         |
-|                                                                         | // display benchmarking times of all n packets sent <br>`bleframework time_results` |
+| `bleframework discover`, `bleframework subscribe`                       | waits until A has paired and subscribed                                             |
+| `bleframework run <payload size> <n>` (n ≤ 100, repeated in blocks)    | benchmark on → idle gap → n notifications → idle gap → benchmark off                |
+| prints the received timer ticks as `RES_BEGIN` / `RES` / `RES_END`      | sends its timer ticks to A over the results characteristic                          |
 
-
-# Troubleshooting
-- In case of any failure, reset the board(s). If this does not help. reflash the appropriate firmware.
 
 ## Measuring with digital pins (current / power)
 
@@ -160,13 +156,13 @@ the encryption of each packet). Connect this pin to the PPK II and trigger it, s
 up with the event. The pins use **active-low** logic: the line is **1 (idle)**
 normally and **0 (active)** while the event is happening.
 
-We use **`P0.03`** and **`P0.04`** for this: they have nothing connected to
+We use **`P0.03`** and **`P0.04`** for this at encryption: they have nothing connected to
 them by default, so unlike an LED pin they draw no current of their own and
-cannot skew the measurement.
+cannot skew the measurement. We use P0.28 and P0.29 for decryption.
 
 ### KSGEN and encryption markers (`P0.03` / `P0.04`, nRF52840)
 
-Both pins only dip for the benchmarked `send_data` notifications (no
+Both pins only dip for the benchmarked notifications (no
 keep-alives, no resends, no decryptions), driven straight from hardware events
 via PPI + GPIOTE without the CPU involved:
 
@@ -174,6 +170,8 @@ via PPI + GPIOTE without the CPU involved:
 |---|---|---|---|
 | `P0.03` | **D0** | KSGEN start → `ENDKSGEN` (keystream generation) | `delta_KSGEN` |
 | `P0.04` | **D1** | `ENDKSGEN` → `ENDCRYPT` (encryption) | `delta_ENCRYPT` |
+
+#### TODO: add rows
 
 So every packet shows a D0 pulse directly followed by a D1 pulse. The CCM has
 no "KSGEN started" event, so while benchmarking the controller starts KSGEN via
@@ -206,3 +204,12 @@ already uses PPI 6–13 and 20–27 (14–19 only with Coded PHY, direction find
 or PA/LNA). The benchmark uses 0–5 and 17–18. Watch out: drivers allocate
 PPI channels at runtime, highest free channel first (the UART takes 19), so
 prefer low channel numbers.
+
+
+# TODO
+
+- explain how idle current offset is handled
+- check whether to switch to 1M PHY or if 2M makes more sense!
+- add possibility to run on unencrypted link to compare overhead of encryption? 
+- 
+
