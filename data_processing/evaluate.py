@@ -1,21 +1,25 @@
 """Evaluate the per-payload measurements of one or all setups: duration (timer) and energy (PPK II).
 
 Input, written by run_benchmark.py (one pair of files per payload size):
-    <root>/raw/<Setup>/ppk_<NNN>.csv     PPK II: Timestamp(ms), Current(uA), D0, D1
-    <root>/raw/<Setup>/timer_<NNN>.csv   timer ticks of every encryption in ns
+    <root>/raw/<Setup>/ppk_<NNN>.csv     PPK II: Timestamp(ms), Current(uA), D0, D1 (enc) or D2, D3 (dec)
+    <root>/raw/<Setup>/timer_<NNN>.csv   timer ticks of every encryption/decryption in ns
 Output:
-    <root>/filtered/<Setup>/<NNN>.csv          one row per encryption
+    <root>/filtered/<Setup>/<NNN>.csv          one row per encryption/decryption
     <root>/accumulated/<Setup>/summary.csv     one row per payload size
 
 Durations come from the 16 MHz timer, the PPK II (10 us resolution) only gives the current during
-the pulse. Both are joined by order: the n-th D1 pulse is the n-th timer record.
+the pulse. Both are joined by order: the n-th D1 (or tagged D2) pulse is the n-th timer record.
 
-Pins (active low, both on Device B, only for the benchmarked notifications, no resends):
+Pins (active low, all on Device B):
+    enc, only for the benchmarked notifications, no resends:
     D0 = P0.03, keystream generation (KSGEN start -> ENDKSGEN), nRF52 only
     D1 = P0.04, encryption (ENDKSGEN -> ENDCRYPT), starts on the same edge where D0 ends
+    dec:
+    D2 = P0.28, decryption (RADIO ADDRESS -> ENDCRYPT) of every received packet, includes the reception
+    D3 = P0.29, goes low after a D2 pulse that was measured
 
 Usage:
-    python evaluate.py [--root measurements/enc] [--setup SecCon_16Bytes]
+    python evaluate.py [--mode enc|dec] [--setup SecCon_16Bytes]
 """
 
 import argparse
@@ -30,19 +34,25 @@ DEFAULT_PAYLOADS = "1,20,50,100,150,200,244"
 
 ENCRYPT = "D1"  # P0.04
 KSGEN = "D0"    # P0.03
+DECRYPT = "D2"  # P0.28
+TAG = "D3"      # P0.29
+PINS = {"enc": (KSGEN, ENCRYPT), "dec": (DECRYPT, TAG)}  # recorded per mode
 CURRENT = "Current(uA)"
 
 VOLTAGE_V = 3.0          # PPK II source voltage for Device B (always 3.0 V)
 SAMPLE_US = 10           # PPK II at 100 kHz
 MAX_PULSE_US = 1000      # longer lows are no encryption (e.g. pins read 0 before GPIO init)
+MAX_DECRYPT_US = 2500    # decryption takes as long as the reception (244 B: 1 ms on 2M, 2 ms on 1M)
 IDLE_WINDOW_MS = 400     # baseline current: median of this window before the first pulse
 MAX_DIFF_US = 10         # allowed difference between PPK pulse and timer duration (one sample)
 
 # ksgen_encrypt = the whole CCM job (nRF52: ksgen + encrypt, nRF54L: only this one is measured)
-PHASES = ("ksgen", "encrypt", "ksgen_encrypt")
-OPS_COLUMNS = ["index"] + [f"{p}_us" for p in PHASES] + [
-    f"{prefix}{p}{suffix}" for p in PHASES
-    for prefix, suffix in (("ppk_", "_us"), ("", "_current_uA"), ("", "_energy_uJ"), ("", "_energy_net_uJ"))]
+# dec on the nRF52: KSGEN runs earlier and has no pin, so only "decrypt" has an energy
+PHASES = {
+    "enc": ("ksgen", "encrypt", "ksgen_encrypt"),
+    "dec": ("ksgen", "decrypt", "ksgen_decrypt"),
+}
+NET_PHASES = {"enc": ("ksgen_encrypt",), "dec": ("decrypt", "ksgen_decrypt")}  # net energy in the summary
 # the CCM is a fixed-cycle hardware job: durations barely vary (std 0), max only flags outliers.
 # Energy varies (PPK noise), so it gets mean + std. Every single value stays in filtered/<NNN>.csv.
 DURATION_STATS = ("mean", "max")
@@ -77,15 +87,41 @@ def ksgen_runs(pin, enc_start):
     return np.where(found, k_start[j], 0), np.where(found, k_end[j], 1), found
 
 
+def tagged_runs(pin, tag):
+    """The D2 pulses that are followed by a D3 falling edge before the next D2 pulse."""
+    start, end = low_runs(pin)
+    tag_start, _ = low_runs(tag)
+    k = np.searchsorted(end, tag_start, side="right") - 1  # last pulse that ended before the tag
+    k = np.unique(k[k >= 0])                               # -1: D3 was low before the first pulse
+    return start[k], end[k]
+
+
+def ops_columns(mode):
+    phases = PHASES[mode]
+    return ["index"] + [f"{p}_us" for p in phases] + [
+        f"{prefix}{p}{suffix}" for p in phases
+        for prefix, suffix in (("ppk_", "_us"), ("", "_current_uA"), ("", "_energy_uJ"), ("", "_energy_net_uJ"))]
+
+
 def evaluate_payload(ppk_path, timer_path):
-    ppk = pd.read_csv(ppk_path, usecols=[CURRENT, ENCRYPT, KSGEN],
-                      dtype={CURRENT: "float32", ENCRYPT: "int8", KSGEN: "int8"})
     timer = pd.read_csv(timer_path)
+    mode = "dec" if "delta_DECRYPT_ns" in timer else "enc"
+    _, op, ksgen_op = PHASES[mode]
+    delta_op = f"delta_{op.upper()}_ns"
+    columns = ops_columns(mode)
+
+    pins = PINS[mode]
+    ppk = pd.read_csv(ppk_path, usecols=[CURRENT, *pins], dtype={CURRENT: "float32", **{p: "int8" for p in pins}})
     current = ppk[CURRENT].to_numpy()
     csum = np.concatenate(([0.0], np.cumsum(current, dtype=np.float64)))
 
-    start, end = low_runs(ppk[ENCRYPT].to_numpy())
-    keep = (end - start) * SAMPLE_US <= MAX_PULSE_US
+    if mode == "dec":
+        start, end = tagged_runs(ppk[DECRYPT].to_numpy(), ppk[TAG].to_numpy())
+        max_us = MAX_DECRYPT_US
+    else:
+        start, end = low_runs(ppk[ENCRYPT].to_numpy())
+        max_us = MAX_PULSE_US
+    keep = (end - start) * SAMPLE_US <= max_us
     start, end = start[keep], end[keep]
 
     first = start[0] if len(start) else len(current)
@@ -93,22 +129,28 @@ def evaluate_payload(ppk_path, timer_path):
 
     # timer durations in us. nRF52: KSGEN and ENCRYPT are separate steps, ksgen_encrypt is their sum.
     # nRF54L: the CCM does both in one job, the timer and D1 cover it as a whole -> only ksgen_encrypt.
+    # Same for DECRYPT.
     nrf52 = "delta_KSGEN_ns" in timer
     ops = pd.DataFrame({"index": timer["index"]})
     if nrf52:
         ops["ksgen_us"] = timer["delta_KSGEN_ns"] / 1000
-        ops["encrypt_us"] = timer["delta_ENCRYPT_ns"] / 1000
-        ops["ksgen_encrypt_us"] = ops["ksgen_us"] + ops["encrypt_us"]
+        ops[f"{op}_us"] = timer[delta_op] / 1000
+        ops[f"{ksgen_op}_us"] = ops["ksgen_us"] + ops[f"{op}_us"]
     else:
-        ops["ksgen_encrypt_us"] = timer["delta_ENCRYPT_ns"] / 1000
+        ops[f"{ksgen_op}_us"] = timer[delta_op] / 1000
 
     if len(start) != len(timer):
-        print(f"Warning: {ppk_path.name}: {len(start)} D1 pulses but {len(timer)} timer records, no energy")
-        return ops.reindex(columns=OPS_COLUMNS), idle_uA
+        name = "tagged D2" if mode == "dec" else "D1"
+        print(f"Warning: {ppk_path.name}: {len(start)} {name} pulses but {len(timer)} timer records, no energy")
+        return ops.reindex(columns=columns), idle_uA, mode
 
     # PPK window (start row, end row, found) per phase
     every = np.ones(len(start), bool)
-    if nrf52:
+    if not nrf52:
+        windows = {ksgen_op: (start, end, every)}
+    elif mode == "dec":
+        windows = {"decrypt": (start, end, every)}
+    else:
         # D1 starts where KSGEN ends, so the whole job is D1 extended back by the timer's KSGEN length.
         # Unlike the D0 pulse this never gets lost between two samples.
         ksgen_samples = np.ceil(ops["ksgen_us"].to_numpy() / SAMPLE_US).astype(int)
@@ -117,8 +159,6 @@ def evaluate_payload(ppk_path, timer_path):
             "encrypt": (start, end, every),
             "ksgen_encrypt": (np.maximum(start - ksgen_samples, 0), end, every),
         }
-    else:
-        windows = {"ksgen_encrypt": (start, end, every)}
 
     for phase, (s, e, found) in windows.items():
         mean_uA = np.where(found, (csum[e] - csum[s]) / (e - s), np.nan)
@@ -128,23 +168,25 @@ def evaluate_payload(ppk_path, timer_path):
         ops[f"{phase}_energy_net_uJ"] = (mean_uA - idle_uA) * ops[f"{phase}_us"] * 1e-6 * VOLTAGE_V
 
     # same columns on every board, the ones a board does not have stay empty
-    return ops.reindex(columns=OPS_COLUMNS), idle_uA
+    return ops.reindex(columns=columns), idle_uA, mode
 
 
-def summarize(payload, ops, idle_uA):
+def summarize(payload, ops, idle_uA, mode):
     """One row per payload; columns a board has no values for (e.g. ksgen on the nRF54L) stay empty."""
     row = {"payload": payload, "ops": len(ops)}
-    for phase in PHASES:
+    for phase in PHASES[mode]:
         for stat in DURATION_STATS:
             row[f"{phase}_{stat}_us"] = ops[f"{phase}_us"].agg(stat)
-    for phase in PHASES:
+    for phase in PHASES[mode]:
         for stat in ENERGY_STATS:
             row[f"{phase}_energy_{stat}_uJ"] = ops[f"{phase}_energy_uJ"].agg(stat)
-    for stat in ENERGY_STATS:
-        row[f"ksgen_encrypt_energy_net_{stat}_uJ"] = ops["ksgen_encrypt_energy_net_uJ"].agg(stat)
-    # D0 pulses the PPK missed (KSGEN shorter than a sample); only meaningful if ksgen energy was computed
-    measured = ops["ksgen_us"].notna() & ops["ksgen_encrypt_energy_uJ"].notna()
-    row["ksgen_missing"] = int(ops.loc[measured, "ksgen_energy_uJ"].isna().sum()) if measured.any() else np.nan
+    for phase in NET_PHASES[mode]:
+        for stat in ENERGY_STATS:
+            row[f"{phase}_energy_net_{stat}_uJ"] = ops[f"{phase}_energy_net_uJ"].agg(stat)
+    if mode == "enc":
+        # D0 pulses the PPK missed (KSGEN shorter than a sample); only meaningful if ksgen energy was computed
+        measured = ops["ksgen_us"].notna() & ops["ksgen_encrypt_energy_uJ"].notna()
+        row["ksgen_missing"] = int(ops.loc[measured, "ksgen_energy_uJ"].isna().sum()) if measured.any() else np.nan
     row["idle_uA"] = idle_uA
     return row
 
@@ -167,12 +209,12 @@ def evaluate_setup(root, setup, payloads=None):
             print(f"Warning: {ppk_path} missing, skipped")
             continue
 
-        ops, idle_uA = evaluate_payload(ppk_path, timer_path)
+        ops, idle_uA, mode = evaluate_payload(ppk_path, timer_path)
         ops.round(4).to_csv(filtered / f"{payload:03d}.csv", index=False)
-        rows.append(summarize(payload, ops, idle_uA))
+        rows.append(summarize(payload, ops, idle_uA, mode))
 
         # the PPK pulses should match the timer within one sample
-        for phase in PHASES:
+        for phase in PHASES[mode]:
             ppk_median, timer_median = ops[f"ppk_{phase}_us"].median(), ops[f"{phase}_us"].median()
             if abs(ppk_median - timer_median) > MAX_DIFF_US:  # False for empty (NaN) columns
                 print(f"Warning: payload {payload}: {phase} PPK pulse {ppk_median} us "
@@ -198,9 +240,11 @@ def evaluate_setup(root, setup, payloads=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--root", type=Path, default=Path("measurements/enc"))
+    parser.add_argument("--mode", choices=PHASES, default="enc")
+    parser.add_argument("--root", type=Path, help="default: measurements/<mode>")
     parser.add_argument("--setup", choices=SETUPS, help="default: every setup that has raw data")
     args = parser.parse_args()
+    args.root = args.root or Path("measurements") / args.mode
 
     setups = [args.setup] if args.setup else [s for s in SETUPS if any((args.root / "raw" / s).glob("timer_*.csv"))]
     if not setups:
