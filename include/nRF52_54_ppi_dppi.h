@@ -101,6 +101,17 @@
 #define PACKET_MARKER_ENC_START_PPI  17  /* free PPI channel: pin -> LOW       */
 #define PACKET_MARKER_ENC_END_PPI    18  /* free PPI channel: pin -> HIGH      */
 
+/* DECRYPTION MARKER (active low) -> PPK II D2: RADIO ADDRESS -> LOW, ENDCRYPT -> HIGH, for every RX of a dec run */
+#define DECRYPT_MARKER_PORT          0
+#define DECRYPT_MARKER_PIN           28
+#define DECRYPT_MARKER_GPIOTE_CH     2
+#define DECRYPT_MARKER_START_PPI     15  /* 15/16: only used by the controller with a PA/LNA */
+#define DECRYPT_MARKER_END_PPI       16
+
+/* DECRYPTION TAG (active low, plain GPIO) -> PPK II D3: LOW after a D2 pulse that was measured */
+#define DECRYPT_TAG_PORT             0
+#define DECRYPT_TAG_PIN              29
+
 void hal_radio_ccm_nRF52840_ppi_config();
 
 /* We only have KSGEN in the AES-CCM peripheral of the nRF52840 (and nRF5340, but its values are defined elsewhere) */
@@ -123,6 +134,16 @@ extern struct k_sem encryption_measurement_sem;
 
 /* We must declare the payload as an external variable, because we later filter for packages with this payload + 7 Bytes header data (+ other data) */
 extern volatile int payload_size_i;
+
+/*
+ * Rx filter of the decryption benchmark (DUT only, see isr_rx_pdu in lll_conn.c):
+ * an ATT Write Command (0x52) to handle rx_handle_i with rx_payload_size_i bytes of payload
+ * (+ 7 bytes header, like the Tx filter). 0 = off. Separate from payload_size_i, so the
+ * Tx and Rx filters never mix up.
+ */
+extern volatile int rx_payload_size_i;
+extern volatile uint16_t rx_handle_i;
+
 extern volatile struct benchmark_measurement encryption_measurement;
 extern volatile struct benchmark_measurement decryption_measurement;
 
@@ -196,6 +217,10 @@ extern struct k_sem encryption_measurement_sem;
 
 /* We must declare the payload as an external variable, because we later filter for packages with this payload + 7 Bytes header data (+ other data) */
 extern volatile int payload_size_i;
+
+/* Rx filter of the decryption benchmark, see the nRF52 part above */
+extern volatile int rx_payload_size_i;
+extern volatile uint16_t rx_handle_i;
 
 /* /!\ we only save ticks in the structs and multiply by TIMER_TICK_NS when printing the values (less time critical and more efficient) */
 extern volatile struct benchmark_measurement encryption_measurement;

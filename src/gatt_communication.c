@@ -60,13 +60,34 @@ static struct bt_uuid_128 control_chrc_uuid =
         0x78, 0x56,
         0x34, 0x12, 0x78, 0x56, 0x34, 0x12);
 
+/* data-in characteristic: Device A writes the payloads of a decryption run to the DUT */
+static struct bt_uuid_128 data_in_chrc_uuid =
+    BT_UUID_INIT_128(
+        0xf3, 0xde, 0xbc, 0x9a,
+        0x78, 0x56,
+        0x34, 0x12,
+        0x78, 0x56,
+        0x34, 0x12, 0x78, 0x56, 0x34, 0x12);
+
 /* DUT: the last valid run request, auto_benchmark_run() waits on run_request_sem */
 K_SEM_DEFINE(run_request_sem, 0, 1);
 volatile uint8_t run_request_payload_size;
 volatile uint16_t run_request_packets;
+volatile uint8_t run_request_mode;
 
-/* Device A: value handle of the DUT's control characteristic (0 = not discovered) */
+/* DUT: decryption run, payloads of the expected size received on data-in (BT RX thread) */
+K_SEM_DEFINE(writes_done_sem, 0, 1);
+static volatile uint8_t writes_payload_size;
+static volatile uint16_t writes_expected;
+static volatile uint16_t writes_count;
+
+/* Device A: value handles of the DUT's control and data-in characteristics (0 = not discovered) */
 static uint16_t control_value_handle;
+static uint16_t data_in_value_handle;
+
+/* Device A: the DUT's READY record of a decryption run (results characteristic) */
+K_SEM_DEFINE(dut_ready_sem, 0, 1);
+static volatile bool write_sent = true;
 
 /*
  * GATT Server
@@ -94,23 +115,65 @@ static ssize_t control_write(struct bt_conn *conn, const struct bt_gatt_attr *at
 
     uint8_t payload_size = rec[1];
     uint16_t packets = sys_get_le16(&rec[2]);
+    uint8_t mode = rec[4];
 
     if (rec[0] != CONTROL_RUN || payload_size < 1 || payload_size > MAX_PAYLOAD_SIZE ||
-        packets < 1 || packets > SUM_ARRAY_MAX_SIZE) {
+        packets < 1 || packets > SUM_ARRAY_MAX_SIZE ||
+        (mode != CONTROL_MODE_ENC && mode != CONTROL_MODE_DEC)) {
         return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
     }
 
     run_request_payload_size = payload_size;
     run_request_packets = packets;
+    run_request_mode = mode;
     k_sem_give(&run_request_sem);
 
     return len;
+}
+
+// DUT: one payload of a decryption run; only payloads of the announced size count
+static ssize_t data_in_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                             const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    if (offset == 0 && len == writes_payload_size && writes_count < writes_expected) {
+        writes_count++;
+        if (writes_count == writes_expected) {
+            k_sem_give(&writes_done_sem);
+        }
+    }
+
+    return len;
+}
+
+uint16_t data_in_handle(void)
+{
+    return bt_gatt_attr_get_handle(&notification_srv.attrs[10]);
+}
+
+void expect_writes(uint8_t payload_size, uint16_t packets)
+{
+    writes_expected = 0;  // no counting while the values change
+    writes_count = 0;
+    writes_payload_size = payload_size;
+    k_sem_reset(&writes_done_sem);
+    writes_expected = packets;
+}
+
+int wait_writes(k_timeout_t timeout)
+{
+    return k_sem_take(&writes_done_sem, timeout);
+}
+
+uint16_t writes_received(void)
+{
+    return writes_count;
 }
 
 /* service + characteristics
  * attrs[2] is the value of the data characteristic (send_data)
  * attrs[5] is the value of the results characteristic
  * attrs[8] is the value of the control characteristic
+ * attrs[10] is the value of the data-in characteristic (decryption run)
  * Each CCC directly follows its value, Device A relies on that (ccc_handle = value_handle + 1)
  */
 BT_GATT_SERVICE_DEFINE(notification_srv,
@@ -136,6 +199,11 @@ BT_GATT_SERVICE_DEFINE(notification_srv,
         BT_GATT_CHRC_WRITE_WITHOUT_RESP,
         BT_GATT_PERM_WRITE,
         NULL, control_write, NULL),
+
+    BT_GATT_CHARACTERISTIC(&data_in_chrc_uuid.uuid,
+        BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+        BT_GATT_PERM_WRITE,
+        NULL, data_in_write, NULL),
 );
 
 /*
@@ -448,13 +516,19 @@ static uint8_t results_notification_cb(struct bt_conn *conn,
 
     case RESULTS_END:
         shell_print(shell, "RES_END,%u", length > 1 ? rec[1] : 0);
-        shell_print(shell, "Summary: %u x %u-byte packets received (B sent %u, measured %u)",
+        // enc: B sent block_sent notifications; dec: B received block_sent writes (A received none)
+        shell_print(shell, "Summary: %u x %u-byte packets received (B sent/received %u, measured %u)",
                     received_in_block, length > 1 ? rec[1] : 0, block_sent, block_measured);
         received_in_block = 0;
         break;
 
     case RESULTS_BATCH_DONE:
         shell_print(shell, "RES_BATCH_DONE");
+        break;
+
+    case RESULTS_READY:
+        // cmd_run (shell thread) waits for this and then writes the payloads
+        k_sem_give(&dut_ready_sem);
         break;
 
     default:
@@ -561,6 +635,9 @@ static uint8_t service_and_characteristics_discovery(struct bt_conn *conn,
         } else if (!bt_uuid_cmp(characteristic->uuid, &control_chrc_uuid.uuid)) {
             control_value_handle = characteristic->value_handle;
             shell_print(shell, "Control value handle: 0x%04x", characteristic->value_handle);
+        } else if (!bt_uuid_cmp(characteristic->uuid, &data_in_chrc_uuid.uuid)) {
+            data_in_value_handle = characteristic->value_handle;
+            shell_print(shell, "Data-in value handle: 0x%04x", characteristic->value_handle);
         }
     }
 
@@ -584,22 +661,80 @@ int start_discovery(struct bt_conn *conn)
     results_subscribe_params.value_handle = 0;
     results_subscribe_params.ccc_handle = 0;
     control_value_handle = 0;
+    data_in_value_handle = 0;
 
     return bt_gatt_discover(conn, &discover_params);
 }
 
 // Device A: asks the DUT to measure one payload size, the results follow as RES lines
-int request_run(struct bt_conn *conn, uint8_t payload_size, uint16_t packets)
+int request_run(struct bt_conn *conn, uint8_t payload_size, uint16_t packets, uint8_t mode)
 {
     uint8_t rec[CONTROL_RUN_LEN];
 
-    if (!control_value_handle) {
+    if (!control_value_handle || (mode == CONTROL_MODE_DEC && !data_in_value_handle)) {
         return -ENOENT;
     }
 
     rec[0] = CONTROL_RUN;
     rec[1] = payload_size;
     sys_put_le16(packets, &rec[2]);
+    rec[4] = mode;
+
+    // a READY of an earlier (aborted) run shouldn't start this one
+    k_sem_reset(&dut_ready_sem);
 
     return bt_gatt_write_without_response(conn, control_value_handle, rec, sizeof(rec), false);
+}
+
+int wait_dut_ready(k_timeout_t timeout)
+{
+    return k_sem_take(&dut_ready_sem, timeout);
+}
+
+static void write_complete_cb(struct bt_conn *conn, void *user_data)
+{
+    write_sent = true;
+}
+
+// wait (bounded) until the previous write is on air, like wait_notification_sent() on the DUT
+static void wait_write_sent(void)
+{
+    int waited_ms = 0;
+    while (write_sent == false && waited_ms < 1000) {
+        k_sleep(K_MSEC(1));
+        waited_ms++;
+    }
+}
+
+// Device A: the payloads of a decryption run, one write without response each
+int send_writes(struct bt_conn *conn, int n, int payload_size)
+{
+    uint8_t payload[MAX_PAYLOAD_SIZE];
+    int err = 0;
+
+    if (!data_in_value_handle) {
+        return -ENOENT;
+    }
+    if (payload_size < 1 || payload_size > MAX_PAYLOAD_SIZE) {
+        return -EINVAL;
+    }
+
+    for (int i = 0; i < n; i++) {
+        wait_write_sent();
+
+        sys_rand_get(payload, payload_size);
+        write_sent = false;
+
+        err = bt_gatt_write_without_response_cb(conn, data_in_value_handle, payload, payload_size,
+                                                false, write_complete_cb, NULL);
+        if (err) {
+            write_sent = true;
+            break;
+        }
+    }
+
+    wait_write_sent();
+    write_sent = true;
+
+    return err;
 }

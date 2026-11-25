@@ -861,7 +861,11 @@ static int cmd_subscribe(const struct shell *sh, size_t argc, char *argv[])
 	return 0;
 }
 
-// Device A: "run <payload_size> [n]" lets the DUT (auto_dut build) measure one payload size
+/* decryption run: max. wait for the DUT's READY (it waits an idle gap of 500 ms first) */
+#define DUT_READY_TIMEOUT_S 5
+
+// Device A: "run <payload_size> [n] [enc|dec]" lets the DUT (auto_dut build) measure one payload size.
+// enc (default): the DUT sends n notifications. dec: A writes n payloads to the DUT after its READY.
 static int cmd_run(const struct shell *sh, size_t argc, char *argv[])
 {
 	char *endptr;
@@ -881,18 +885,47 @@ static int cmd_run(const struct shell *sh, size_t argc, char *argv[])
 		}
 	}
 
+	uint8_t mode = CONTROL_MODE_ENC;
+	if (argc > 3) {
+		if (!strcmp(argv[3], "dec")) {
+			mode = CONTROL_MODE_DEC;
+		} else if (strcmp(argv[3], "enc")) {
+			shell_error(sh, "mode must be enc or dec");
+			return -EINVAL;
+		}
+	}
+
 	if (!default_conn) {
 		shell_error(sh, "Not connected");
 		return -ENOTCONN;
 	}
 
-	int err = request_run(default_conn, (uint8_t)payload_size, (uint16_t)n);
+	int err = request_run(default_conn, (uint8_t)payload_size, (uint16_t)n, mode);
 	if (err) {
 		shell_error(sh, "RUN failed (err %d), run discover first?", err);
 		return err;
 	}
 
-	shell_print(sh, "RUN,%ld,%ld", payload_size, n);
+	if (mode == CONTROL_MODE_ENC) {
+		shell_print(sh, "RUN,%ld,%ld", payload_size, n);
+		return 0;
+	}
+
+	shell_print(sh, "RUN,%ld,%ld,dec", payload_size, n);
+
+	// the DUT measures from its READY on; the results follow as RES lines like for enc
+	err = wait_dut_ready(K_SECONDS(DUT_READY_TIMEOUT_S));
+	if (err) {
+		shell_error(sh, "No READY from the DUT (err %d)", err);
+		return err;
+	}
+
+	err = send_writes(default_conn, (int)n, (int)payload_size);
+	if (err) {
+		shell_error(sh, "Writing the payloads failed (err %d)", err);
+		return err;
+	}
+
 	return 0;
 }
 
@@ -1011,7 +1044,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(cmds,
 	SHELL_CMD_ARG(ifa4, NULL, "", cmd_ifa_stage4, 3, 0),
 	SHELL_CMD_ARG(ifa, NULL, "ifa addr addr_type n \n addr is target address formatted as "HELP_ADDR_LE" \n n is number of bondings\n", cmd_ifa, 4, 0),
 	SHELL_CMD_ARG(send_data, NULL, "<count> [payload_size]", cmd_send_data, 2, 2),
-	SHELL_CMD_ARG(run, NULL, "<payload_size> [n] (DUT in auto_dut build measures one payload size)", cmd_run, 2, 1),
+	SHELL_CMD_ARG(run, NULL, "<payload_size> [n] [enc|dec] (DUT in auto_dut build measures one payload size)", cmd_run, 2, 2),
 	SHELL_CMD_ARG(benchmark, NULL, "<value: on, off>", cmd_benchmark, 2, 0),
 	SHELL_CMD(discover, NULL, "Discovery of Services and Characteristics", cmd_service_and_characteristic_discovery),
 	SHELL_CMD(subscribe, NULL, "Subscription to a predefinec characteristic", cmd_subscribe),

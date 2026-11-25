@@ -61,7 +61,8 @@ void benchmark_off(void) {
     // without KSGEN_START_ENC_PPI, radio.c starts KSGEN in software again
     nrf_ppi_channels_disable(NRF_PPI,
         BIT(KSGEN_START_ENC_PPI) | BIT(HAL_CRYPT_END_TIME_KSGEN_PPI) |
-        BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI));
+        BIT(HAL_CRYPT_START_TIME_DECRYPT_PPI) | BIT(HAL_CRYPT_END_TIME_ENDCRYPT_PPI) |
+        BIT(DECRYPT_MARKER_START_PPI) | BIT(DECRYPT_MARKER_END_PPI));
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF5340_CPUAPP )
     send_signal_nRF5340_dppi_disable();
     #elif defined(CONFIG_SOC_COMPATIBLE_NRF54LX)

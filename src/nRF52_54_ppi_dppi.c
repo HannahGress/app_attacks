@@ -21,6 +21,8 @@
 /* The nRF54L15 spec does not mention KSGEN as part of the AES-CCm peripheral task */
 K_SEM_DEFINE(encryption_measurement_sem, 0, 1);
 volatile int payload_size_i = 0;
+volatile int rx_payload_size_i = 0;
+volatile uint16_t rx_handle_i = 0;
 volatile struct benchmark_measurement encryption_measurement;
 volatile struct benchmark_measurement decryption_measurement;
 volatile struct benchmark_measurement encryption_measurements[SUM_ARRAY_MAX_SIZE];
@@ -33,6 +35,8 @@ volatile uint32_t decryption_measurement_count = 0;
 
 K_SEM_DEFINE(encryption_measurement_sem, 0, 1);
 volatile int payload_size_i = 0;
+volatile int rx_payload_size_i = 0;
+volatile uint16_t rx_handle_i = 0;
 volatile struct benchmark_measurement encryption_measurement;
 volatile struct benchmark_measurement decryption_measurement;
 volatile struct benchmark_measurement encryption_measurements[SUM_ARRAY_MAX_SIZE];
@@ -171,6 +175,33 @@ void hal_radio_ccm_nRF52840_ppi_config() {
         PACKET_MARKER_ENC_END_PPI,
         (uint32_t)&NRF_CCM->EVENTS_ENDCRYPT,
         nrf_gpiote_task_address_get(NRF_GPIOTE, NRF_GPIOTE_TASK_SET_1));
+
+    /* DECRYPTION MARKER -> PPK II D2, the PPI channels are enabled per RX in lll_conn.c */
+    nrf_gpiote_task_configure(
+        NRF_GPIOTE,
+        DECRYPT_MARKER_GPIOTE_CH,
+        NRF_GPIO_PIN_MAP(DECRYPT_MARKER_PORT, DECRYPT_MARKER_PIN),
+        NRF_GPIOTE_POLARITY_TOGGLE,
+        NRF_GPIOTE_INITIAL_VALUE_HIGH);
+    nrf_gpiote_task_enable(NRF_GPIOTE, DECRYPT_MARKER_GPIOTE_CH);
+
+    /* decryption start (ADDRESS) -> pin LOW */
+    nrf_ppi_channel_endpoint_setup(
+        NRF_PPI,
+        DECRYPT_MARKER_START_PPI,
+        (uint32_t)&NRF_RADIO->EVENTS_ADDRESS,
+        nrf_gpiote_task_address_get(NRF_GPIOTE, NRF_GPIOTE_TASK_CLR_2));
+
+    /* decryption end (ENDCRYPT) -> pin HIGH */
+    nrf_ppi_channel_endpoint_setup(
+        NRF_PPI,
+        DECRYPT_MARKER_END_PPI,
+        (uint32_t)&NRF_CCM->EVENTS_ENDCRYPT,
+        nrf_gpiote_task_address_get(NRF_GPIOTE, NRF_GPIOTE_TASK_SET_2));
+
+    /* DECRYPTION TAG -> PPK II D3 */
+    nrf_gpio_pin_set(NRF_GPIO_PIN_MAP(DECRYPT_TAG_PORT, DECRYPT_TAG_PIN));
+    nrf_gpio_cfg_output(NRF_GPIO_PIN_MAP(DECRYPT_TAG_PORT, DECRYPT_TAG_PIN));
 }
 #endif
 
