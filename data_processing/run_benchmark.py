@@ -1,17 +1,17 @@
 """Measure every payload size in its own run: PPK II recording + timer ticks per payload.
 
 The PPK II (source meter) powers Device B (DUT, auto_dut build, no USB). Device A (normal build, USB)
-pairs with B and sends "bleframework run <payload> <n>" for each payload size. B measures that one size and
-sends its timer ticks back to A, which prints them as RES lines. Per payload this writes
-    measurements/enc/raw/<Setup>/ppk_<NNN>.csv     current + D0/D1 of the PPK II
-    measurements/enc/raw/<Setup>/timer_<NNN>.csv   timer ticks of every encryption, converted to ns
+pairs with B and sends "bleframework run <payload> <n> <mode>" for each payload size. B measures that one size
+and sends its timer ticks back to A, which prints them as RES lines. Per payload this writes
+    measurements/<mode>/raw/<Setup>/ppk_<NNN>.csv     current + D0/D1 (enc) or D2/D3 (dec) of the PPK II
+    measurements/<mode>/raw/<Setup>/timer_<NNN>.csv   timer ticks of every encryption/decryption, converted to ns
 and evaluates the setup at the end (evaluate.py).
 
 B measures at most 100 packets per "run" (its timer array), so more packets are sent as blocks of 100
 within one PPK recording. --n packets are sent for every payload size.
 
 Usage:
-    python run_benchmark.py --setup SecCon_16Bytes --n 1000 [--payloads 1-244]
+    python run_benchmark.py --setup SecCon_16Bytes --n 1000 [--mode enc|dec] [--payloads 1-244]
 """
 
 import argparse
@@ -63,8 +63,9 @@ def open_ppk(port):
 class Recorder:
     """Collects the raw PPK II byte stream in a thread, decoding happens after the recording."""
 
-    def __init__(self, ppk):
+    def __init__(self, ppk, pins=("D0", "D1")):
         self.ppk = ppk
+        self.pins = pins
         self.chunks = []
         self.running = False
         self.thread = None
@@ -96,8 +97,7 @@ class Recorder:
         return pd.DataFrame({
             "Timestamp(ms)": np.round(np.arange(len(current)) * evaluate.SAMPLE_US / 1000, 2),
             "Current(uA)": np.round(current, 3),
-            "D0": bits & 1,
-            "D1": (bits >> 1) & 1,
+            **{pin: (bits >> int(pin[1])) & 1 for pin in self.pins},
         })
 
 
@@ -164,14 +164,16 @@ def connect(a, setup):
     time.sleep(0.5)  # B polls link_ready() every 100 ms
 
 
-def run_block(a, payload, n):
+def run_block(a, payload, n, mode):
     """One 'run' on B (n <= BLOCK packets); returns A's lines and the timer records as ns."""
-    a.send_command(f"bleframework run {payload} {n}")
+    a.send_command(f"bleframework run {payload} {n} {mode}")
     lines = read_lines(a, lambda line: line == f"RES_END,{payload}", RUN_TIMEOUT_S)
 
     begin = next(line for line in lines if line.startswith("RES_BEGIN,")).split(",")
     count, fields, timer_hz = int(begin[3]), int(begin[4]), int(begin[5])
     names = TIMER_FIELDS[-fields:]  # nRF54L: ENCRYPT only
+    if mode == "dec":
+        names = [name.replace("ENCRYPT", "DECRYPT") for name in names]
 
     records = [line.split(",")[3:] for line in lines if line.startswith(f"RES,{payload},")]
     records = [r for r in records if len(r) == fields]  # ticks only, cut lines are dropped
@@ -180,7 +182,7 @@ def run_block(a, payload, n):
     return lines, count, timer
 
 
-def run_payload(a, recorder, payload, n, out_dir):
+def run_payload(a, recorder, payload, n, mode, out_dir):
     """n packets as blocks of BLOCK, all in one PPK recording: one ppk + one timer file per payload."""
     blocks = [BLOCK] * (n // BLOCK) + ([n % BLOCK] if n % BLOCK else [])
     timers, log_lines, problems = [], [], []
@@ -191,7 +193,7 @@ def run_payload(a, recorder, payload, n, out_dir):
         for i, size in enumerate(blocks):
             # one block takes a few seconds (2 x 500 ms idle on B + packets + results), show that it is alive
             print(f"Payload {payload:3d}: sending block {i + 1}/{len(blocks)} ({size} packets)...", end="\r", flush=True)
-            lines, count, timer = run_block(a, payload, size)
+            lines, count, timer = run_block(a, payload, size, mode)
             timers.append(timer)
             log_lines += lines
             if count != size or len(timer) != size:
@@ -202,7 +204,7 @@ def run_payload(a, recorder, payload, n, out_dir):
         ppk = recorder.stop()
 
     timer = pd.concat(timers, ignore_index=True)
-    timer.insert(0, "index", timer.index)  # 0..n-1 in the order of the D1 pulses
+    timer.insert(0, "index", timer.index)  # 0..n-1 in the order of the D1 (dec: tagged D2) pulses
 
     if problems:
         log = out_dir / f"a_{payload:03d}.log"
@@ -236,12 +238,14 @@ def pick_board(port):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--setup", required=True, choices=evaluate.SETUPS)
+    parser.add_argument("--mode", choices=evaluate.PHASES, default="enc", help="what B measures (default: enc)")
     parser.add_argument("--payloads", default=evaluate.DEFAULT_PAYLOADS, help="e.g. 1,20,50 or 1-244")
     parser.add_argument("--n", type=int, required=True, help="packets per payload size")
     parser.add_argument("--port-a", help="serial port of Device A (default: ask nrfutil)")
     parser.add_argument("--port-ppk", help="serial port of the PPK II (default: first one found)")
-    parser.add_argument("--root", type=Path, default=Path("measurements/enc"))
+    parser.add_argument("--root", type=Path, help="default: measurements/<mode>")
     args = parser.parse_args()
+    args.root = args.root or Path("measurements") / args.mode
     if args.n < 1:
         parser.error("--n must be at least 1")
     payloads = evaluate.parse_payloads(args.payloads)
@@ -263,9 +267,9 @@ def main():
     try:
         connect(a, args.setup)
         print(f"Subscribed. Benchmarking {len(payloads)} payload size(s) x {args.n} packets, please wait...")
-        recorder = Recorder(ppk)
+        recorder = Recorder(ppk, evaluate.PINS[args.mode])
         for payload in payloads:
-            run_payload(a, recorder, payload, args.n, out_dir)
+            run_payload(a, recorder, payload, args.n, args.mode, out_dir)
     finally:
         ppk.toggle_DUT_power("OFF")
         a.disconnect()
